@@ -1,0 +1,9 @@
+#Read Me.
+
+= Introduction =
+
+Looks like I failed to get the framework to compile such that it's copied to the test harness's framework folder.  I'll get to this shortly.  
+
+= Details =
+
+Copy the WimFramework from the build folder into the Framework folder inside the Framework folder in the Test Harness Folder
