@@ -6,4 +6,4 @@ Looks like I failed to get the framework to compile such that it's copied to the
 
 = Details =
 
-Copy the WimFramework from the build folder into the Framework folder inside the Framework folder in the Test Harness Folder
+Copy the WIMFramework from the build folder into the Framework folder inside the Framework folder in the Test Harness Folder
