@@ -551,8 +551,7 @@ NSDictionary *WimSession_OnlineStateStrings;
 - (void)buddyListArrived
 {
   MLog(@"buddyListArrived");
-#if 0
-	// We don't want to fire presence events when we get a buddy list
+
   NSArray *buddyList = [_buddyList valueForKey:@"groups"];
   NSEnumerator* buddyListGroups = [buddyList objectEnumerator];
   NSArray* buddyGroups;
@@ -561,14 +560,15 @@ NSDictionary *WimSession_OnlineStateStrings;
   {
     NSEnumerator *buddies = [[buddyGroups valueForKey:@"buddies"] objectEnumerator];
     NSMutableDictionary *buddy;
+    NSString *groupName = [buddyGroups valueForKey:@"name"];
     while (buddy = [buddies nextObject])
     {
-      [[NSNotificationCenter defaultCenter]  postNotificationName:kWimSessionPresenceEvent object:self userInfo:buddy];
+      [buddy setObject:groupName forKey:@"_group"];
     }
   }
-#else
+
   [[NSNotificationCenter defaultCenter] postNotificationName:kWimSessionBuddyListEvent object:self userInfo:_buddyList];
-#endif
+
 }
 
 - (void)updateBuddyListWithBuddy:(NSDictionary*)newBuddyInfo
@@ -590,14 +590,12 @@ NSDictionary *WimSession_OnlineStateStrings;
       if ( [[buddy stringValueForKeyPath:@"aimId"] isEqual:[newBuddyInfo stringValueForKeyPath:@"aimId"]] ) 
       {
         // We found the same aimID, so let's update the contents of this NSMutableDictionary to reflect the new status...
+        
+        NSString *currentGroup = [[buddy objectForKey:@"_group"] retain];
         [buddy removeAllObjects];
         [buddy addEntriesFromDictionary:newBuddyInfo];
-
-        //NSString* aimId = [buddy stringValueForKeyPath:@"aimId"];        
-        //[[NSNotificationCenter defaultCenter]  postNotificationName:@"prenotifiy.buddy" object:buddy];
-
-        //NSString* notificationName = [NSString stringWithFormat:@"%@.%@", kWimSessionPresenceEvent, aimId];
-        //[[NSNotificationCenter defaultCenter]  postNotificationName:notificationName object:buddy];
+        [buddy setObject:currentGroup forKey:@"_group"];
+        [currentGroup release];
 
         [[NSNotificationCenter defaultCenter]  postNotificationName:kWimSessionPresenceEvent object:self userInfo:buddy];
       }
@@ -709,11 +707,7 @@ NSDictionary *WimSession_OnlineStateStrings;
   // Set up params in alphabetical order
   queryString = [NSMutableString stringWithFormat:@"a=%@&clientName=%@&clientVersion=%@&events=%@&f=json&k=%@&ts=%d",
                      _authToken, [_clientName urlencode], [_clientVersion urlencode], [capabilities urlencode],
-                     [_devID urlencode], abs([[NSDate date] timeIntervalSince1970])];
-
-//                 _authToken, kClientName, kClientVersion, [capabilities urlencode],
-//                 kDevId, abs([[NSDate date] timeIntervalSince1970])];
-    
+                     _devID, abs([[NSDate date] timeIntervalSince1970])];
   
   CFStringRef encodedQueryStringRef = CFURLCreateStringByAddingPercentEscapes(NULL, (CFStringRef)queryString,
                                                                               NULL, (CFStringRef)@";/?:@&=+$,",
@@ -813,7 +807,14 @@ NSDictionary *WimSession_OnlineStateStrings;
   MLog(@"onWimEventSessionStarted");
   
   NSString *jsonResponse = [[[NSString alloc] initWithData:[wimRequest data] encoding:NSUTF8StringEncoding] autorelease];
-  NSDictionary* dictionary = [jsonResponse JSONValue];//[NSDictionary dictionaryWithJSONString:jsonResponse];
+  NSDictionary* dictionary = nil;
+  
+  @try {
+    dictionary = [jsonResponse JSONValue];
+  }
+  @catch (NSException *e) {
+    MLog(@"exception %@", e);
+  }
   
   NSString* statusCode = [dictionary stringValueForKeyPath:@"response.statusCode"];
   
@@ -886,30 +887,40 @@ NSDictionary *WimSession_OnlineStateStrings;
   NSString* jsonResponse = [[[NSString alloc] initWithData:[wimRequest data] encoding:NSUTF8StringEncoding] autorelease];
   MLog (jsonResponse);
   
-  NSDictionary* aDictionary = [jsonResponse JSONValue];//[NSDictionary dictionaryWithJSONString:jsonResponse];
+  NSDictionary* aDictionary = nil;
   
-  NSString* statusCode = [aDictionary stringValueForKeyPath:@"response.statusCode"];
-  if ([statusCode isEqualToString:@"200"])
+  @try {
+    aDictionary = [jsonResponse JSONValue];
+  }
+  @catch (NSException *e) {
+    MLog (@"Exception %@", e);
+  }
+  
+  if (aDictionary)
   {
-    NSTimeInterval nextFetch = [[aDictionary stringValueForKeyPath:@"response.data.timeToNextFetch"] intValue];
-    [_fetchBaseUrl release];
-    _fetchBaseUrl = [[aDictionary stringValueForKeyPath:@"response.data.fetchBaseURL"] retain];
-    
-    NSArray* events = [aDictionary valueForKeyPath:@"response.data.events"];
-    [self parseEvents:events];
-    
-    if (_pendingEndSession==NO)
+    NSString* statusCode = [aDictionary stringValueForKeyPath:@"response.statusCode"];
+    if ([statusCode isEqualToString:@"200"])
     {
-      // change this to delay - timeIntervals as in seconds -- timeToNextFetch is in milliseconds
-      nextFetch = nextFetch / 1000;
+      NSTimeInterval nextFetch = [[aDictionary stringValueForKeyPath:@"response.data.timeToNextFetch"] intValue];
+      [_fetchBaseUrl release];
+      _fetchBaseUrl = [[aDictionary stringValueForKeyPath:@"response.data.fetchBaseURL"] retain];
       
-      if (nextFetch == 0 )
+      NSArray* events = [aDictionary valueForKeyPath:@"response.data.events"];
+      [self parseEvents:events];
+      
+      if (_pendingEndSession==NO)
       {
-        // wait at least a second
-        nextFetch = 1;
+        // change this to delay - timeIntervals as in seconds -- timeToNextFetch is in milliseconds
+        nextFetch = nextFetch / 1000;
+        
+        if (nextFetch == 0 )
+        {
+          // wait at least a second
+          nextFetch = 1;
+        }
+        
+        [self performSelector:@selector(fetchEvents) withObject:self afterDelay:nextFetch];
       }
-      
-      [self performSelector:@selector(fetchEvents) withObject:self afterDelay:nextFetch];
     }
   }
   else
@@ -932,6 +943,7 @@ NSDictionary *WimSession_OnlineStateStrings;
 }
 
 
+
 - (void)onWimEventPresenceResponse:(WimRequest *)wimRequest withError:(NSError *)error
 {  
   if (error)
@@ -941,16 +953,27 @@ NSDictionary *WimSession_OnlineStateStrings;
   }
   
   NSString* jsonResponse = [[[NSString alloc] initWithData:[wimRequest data] encoding:NSUTF8StringEncoding] autorelease];
-  NSDictionary* dictionary =  [jsonResponse JSONValue];
-  NSNumber *statusCode = [dictionary valueForKeyPath:@"response.statusCode"];
   
-  if ([statusCode isEqual:[NSNumber numberWithInt:200]])
+  NSDictionary* dictionary =  nil;
+  
+  @try {
+  dictionary = [jsonResponse JSONValue];
+  } @catch (NSException *e) {
+    MLog(@"Exception %@", e);
+  }
+  if (dictionary)
   {
-    NSEnumerator *buddies = [[dictionary valueForKeyPath:@"response.data.users"] objectEnumerator];
-    NSMutableDictionary *buddy;
-    while (buddy = [buddies nextObject])
+    NSNumber *statusCode = [dictionary valueForKeyPath:@"response.statusCode"];
+    
+    if ([statusCode isEqual:[NSNumber numberWithInt:200]])
     {
-      [[NSNotificationCenter defaultCenter]  postNotificationName:kWimSessionPresenceEvent object:self userInfo:buddy];
+      NSEnumerator *buddies = [[dictionary valueForKeyPath:@"response.data.users"] objectEnumerator];
+      NSMutableDictionary *buddy;
+      while (buddy = [buddies nextObject])
+      {
+        // fire presence events for existing UI - allowing prexisting UI to update state
+        [[NSNotificationCenter defaultCenter]  postNotificationName:kWimSessionPresenceEvent object:self userInfo:buddy];
+      }
     }
   }
 }
@@ -966,13 +989,24 @@ NSDictionary *WimSession_OnlineStateStrings;
   NSString* jsonString = [[[NSString alloc] initWithData:[wimRequest data] encoding:NSUTF8StringEncoding] autorelease];
   MLog (jsonString);
   
-  NSDictionary* jsonDictionary =  [jsonString JSONValue];//[NSDictionary dictionaryWithJSONString:jsonString];
-  NSNumber *statusCode = [jsonDictionary valueForKeyPath:@"response.statusCode"];
   
+  NSDictionary* jsonDictionary =  nil;
   
-  if ([statusCode isEqual:[NSNumber numberWithInt:200]])
-  {
-    [[NSNotificationCenter defaultCenter] postNotificationName:kWimClientIMSent object:self userInfo:jsonDictionary];
+  @try {
+    jsonDictionary = [jsonString JSONValue];
+  }
+  @catch (NSException *e) {
+    MLog (@"Exception %@", e);
+  }
+
+  if (jsonDictionary) {
+    NSNumber *statusCode = [jsonDictionary valueForKeyPath:@"response.statusCode"];
+    
+    
+    if ([statusCode isEqual:[NSNumber numberWithInt:200]])
+    {
+      [[NSNotificationCenter defaultCenter] postNotificationName:kWimClientIMSent object:self userInfo:jsonDictionary];
+    }
   }
 }
 
@@ -984,24 +1018,30 @@ NSDictionary *WimSession_OnlineStateStrings;
     return;
   }
   
-  NSString* jsonResponse = [[[NSString alloc] initWithData:[wimRequest data] encoding:NSUTF8StringEncoding] autorelease];
-  NSDictionary* dictionary = [jsonResponse JSONValue];//[NSDictionary dictionaryWithJSONString:jsonResponse];
-  NSNumber *statusCode = [dictionary valueForKeyPath:@"response.statusCode"];
+  NSString* jsonResponse = [[[NSString alloc] initWithData:[wimRequest data] encoding:NSUTF8StringEncoding] autorelease];;
+  NSDictionary* dictionary = nil;
+  @try {
+    dictionary = [jsonResponse JSONValue];  
+  }
+  @catch (NSException * e) {
+    MLog(@"Exception %@", e);
+  }
   
-  if ([statusCode isEqual:[NSNumber numberWithInt:200]])
+  if (dictionary)
   {
-    NSDictionary *buddy  = [dictionary valueForKeyPath:@"response.data.myInfo"];
+    NSNumber *statusCode = [dictionary valueForKeyPath:@"response.statusCode"];
     
-    [_myInfo release];
-    _myInfo = [buddy retain];
-    
-    //[[NSNotificationCenter defaultCenter]  postNotificationName:@"prenotifiy.buddy" object:buddy];
+    if ([statusCode isEqual:[NSNumber numberWithInt:200]])
+    {
+      NSDictionary *buddy  = [dictionary valueForKeyPath:@"response.data.myInfo"];
+      
+      [_myInfo release];
+      _myInfo = [buddy retain];
 
-    
-    //NSString* notificationName = [NSString stringWithFormat:@"%@.%@", kWimSessionPresenceEvent, [buddy valueForKey:@"aimId"]];
-    //[[NSNotificationCenter defaultCenter]  postNotificationName:notificationName object:buddy];
-    [[NSNotificationCenter defaultCenter]  postNotificationName:kWimSessionMyInfoEvent object:self userInfo:buddy];
-  }  
+      [[NSNotificationCenter defaultCenter]  postNotificationName:kWimSessionMyInfoEvent object:self userInfo:buddy];
+    }
+  }
+  
 }
 
 - (void)onWimEventSetStatusResponse:(WimRequest *)wimRequest withError:(NSError *)error
@@ -1013,20 +1053,24 @@ NSDictionary *WimSession_OnlineStateStrings;
   }
   
   NSString* jsonResponse = [[[NSString alloc] initWithData:[wimRequest data] encoding:NSUTF8StringEncoding] autorelease];
-  NSDictionary* dictionary = [jsonResponse JSONValue];//[NSDictionary dictionaryWithJSONString:jsonResponse];
-  NSNumber *statusCode = [dictionary valueForKeyPath:@"response.statusCode"];
   
-  if ([statusCode isEqual:[NSNumber numberWithInt:200]])
+  NSDictionary* dictionary = nil;
+  @try {
+    dictionary = [jsonResponse JSONValue];
+  }
+  @catch (NSException *e) {
+    MLog(@"Exception %@", e);
+  }
+    
+  if (dictionary)
   {
-//    NSDictionary *buddy  = [dictionary valueForKeyPath:@"response.data.myInfo"];
+    NSNumber *statusCode = [dictionary valueForKeyPath:@"response.statusCode"];
     
-//    [_myInfo release];
-//    _myInfo = [buddy retain];
-    
-//    NSString* notificationName = [NSString stringWithFormat:@"%@.%@", kWimSessionPresenceEvent, [buddy valueForKey:@"aimId"]];
-//    [[NSNotificationCenter defaultCenter]  postNotificationName:notificationName object:buddy];
-//    [[NSNotificationCenter defaultCenter]  postNotificationName:kWimSessionMyInfoEvent object:buddy];
-  }  
+    if ([statusCode isEqual:[NSNumber numberWithInt:200]])
+    {
+		// successful
+    }
+  }
 }
 
 - (void)onWimEventSetProfileResponse:(WimRequest *)wimRequest withError:(NSError *)error
@@ -1063,17 +1107,29 @@ NSDictionary *WimSession_OnlineStateStrings;
   else
   {
     NSString* jsonResponse = [[[NSString alloc] initWithData:[wimRequest data] encoding:NSUTF8StringEncoding] autorelease];
-    NSDictionary* dictionary = [jsonResponse JSONValue];//[NSDictionary dictionaryWithJSONString:jsonResponse];
-    NSNumber *statusCode = [dictionary valueForKeyPath:@"response.statusCode"];
     
-    if ([statusCode intValue] == 200)
+    NSDictionary* dictionary = nil;
+    
+    @try {
+      dictionary = [jsonResponse JSONValue];
+    }
+    @catch (NSException *e) {
+      MLog (@"exception %S", e);
+    }
+    
+    if (dictionary)
     {
-      // if success - then set the friendlyname if specified
+      NSNumber *statusCode = [dictionary valueForKeyPath:@"response.statusCode"];
       
-      NSArray *userData = [wimRequest userData];
-      if ([userData count] == 2)
+      if ([statusCode intValue] == 200)
       {
-        [self setFriendlyName:[userData objectAtIndex:1] toAimId:[userData objectAtIndex:0]];
+        // if success - then set the friendlyname if specified
+        
+        NSArray *userData = [wimRequest userData];
+        if ([userData count] == 2)
+        {
+          [self setFriendlyName:[userData objectAtIndex:1] toAimId:[userData objectAtIndex:0]];
+        }
       }
     }
   }
@@ -1127,7 +1183,7 @@ NSDictionary *WimSession_OnlineStateStrings;
                                 htmlResponse ? htmlResponse : @"", WimSessionBuddyInfoHtmlKey,
                                 nil];
                                 
-    [[NSNotificationCenter defaultCenter] postNotificationName:kWimSessionHostBuddyInfoEvent object:nil userInfo:dictionary];
+    [[NSNotificationCenter defaultCenter] postNotificationName:kWimSessionHostBuddyInfoEvent object:self userInfo:dictionary];
   }
 }  
 

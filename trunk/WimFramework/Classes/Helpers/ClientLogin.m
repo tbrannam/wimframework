@@ -207,7 +207,11 @@ NSString* kAuthOnMethod  = @"auth/clientLogin";
     [queryString appendValue:[_delegate clientVersion] forName:@"clientVersion"];
   }
 
-  [queryString appendValue:[_delegate devID] forName:@"devId"];
+  NSMutableString *devId;
+  devId = [[[_delegate devID] stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding] mutableCopy];
+  //[devId replaceOccurrencesOfString:@"-" withString:@"%2D" options:0 range:NSMakeRange(0, [devId length])];
+
+  [queryString appendValue:devId forName:@"devId"];
   [queryString appendValue:@"json" forName:@"f"];
   [queryString appendValue:@"en-us" forName:@"language"];
 
