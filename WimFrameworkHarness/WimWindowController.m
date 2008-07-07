@@ -22,7 +22,7 @@
 
 //kTestHarnessDevId - DO NOT USE THIS KEY IN YOUR RELEASE APPLICATION - IT MAY BE REVOKED WITHOUT NOTICE
 // GET YOUR OWN FREE DEV KEY http://developer.aim.com/wimReg.jsp
-NSString *kTestHarnessDevId = @"tb1VPXRSFrrZFb-7)";
+NSString *kTestHarnessDevId = @"tb17-IMEDLqnPUbO";
 
 NSString *kClientName = @"WIM Test Harness";
 NSString *kClientVersion = @"0.1";
