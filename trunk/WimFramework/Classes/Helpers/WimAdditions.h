@@ -20,7 +20,9 @@
 #import "WimPlatform.h"
 
 @interface NSString (URLEncode)
--(NSString *) urlencode;
+-(NSString *)urlencode;
++ (NSString *)decodeHTMLEntities:(NSString *)source;
++ (NSString *)encodeHTMLEntities:(NSString *)source;
 @end
 
 @interface NSMutableString (URLVariable)

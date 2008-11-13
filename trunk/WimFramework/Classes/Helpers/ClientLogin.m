@@ -78,6 +78,8 @@ NSString* kAuthOnMethod  = @"auth/clientLogin";
   int statusCode = [[self statusCode] intValue];
   int statusDetailCode = 0;
   
+  MLog(@"onClientLoginResponse statusCode = %d", statusCode);
+  
   // Send a challenge event, if needed
   switch (statusCode)
   {
@@ -108,7 +110,7 @@ NSString* kAuthOnMethod  = @"auth/clientLogin";
             [_delegate performSelector:@selector(clientLoginRequiresChallenge:) withObject:self];
             break;
         default:
-          MLog(@"Unhangled Secondary Challenge");
+          MLog(@"Unhandled Secondary Challenge");
           break;
       }
       break;
@@ -126,7 +128,11 @@ NSString* kAuthOnMethod  = @"auth/clientLogin";
     
       [self setSessionSecret:nil];
       [self setSessionKey:baseSixtyFourHash];
-      
+
+      _clientTime = [[NSDate date] timeIntervalSince1970];
+        
+      MLog(@"ClockSkew = %f", [self clockSkew]);
+        
       if ([_delegate respondsToSelector:@selector(clientLoginComplete:)])
            [_delegate performSelector:@selector(clientLoginComplete:) withObject:self];
                 
@@ -296,6 +302,14 @@ NSString* kAuthOnMethod  = @"auth/clientLogin";
 
 - (NSString *) sessionSecret {
   return [_loginResponse stringValueForKeyPath:@"response.data.sessionSecret"];
+}
+
+- (NSTimeInterval) hostTime {
+  return (NSTimeInterval)[[_loginResponse valueForKeyPath:@"response.data.hostTime"] doubleValue];
+}
+
+- (NSTimeInterval) clockSkew {
+  return [self hostTime] - _clientTime;
 }
 
 - (void)setSessionSecret:(NSString*)newValue{

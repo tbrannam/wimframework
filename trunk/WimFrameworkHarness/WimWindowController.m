@@ -18,13 +18,13 @@
  */
 
 #import "WimWindowController.h"
-
+#import "WimConstants.h"
 
 //kTestHarnessDevId - DO NOT USE THIS KEY IN YOUR RELEASE APPLICATION - IT MAY BE REVOKED WITHOUT NOTICE
 // GET YOUR OWN FREE DEV KEY http://developer.aim.com/wimReg.jsp
 NSString *kTestHarnessDevId = @"tb17-IMEDLqnPUbO";
 
-NSString *kClientName = @"WIM Test Harness";
+NSString *kClientName = @"WIMTestHarness";
 NSString *kClientVersion = @"0.1";
 NSString *kScreenNamePref = @"screenName";
 NSString *kPasswordPref = @"password";
@@ -34,6 +34,9 @@ NSString *kDevIdPref = @"developerKey";
 
 + (void)initialize
 {
+  kAPIBaseURL = kProdAPIBaseURL;
+  kAuthBaseURL = kProdAuthBaseURL;
+
   NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
   
   NSDictionary *appDefaults = [NSDictionary dictionaryWithObjectsAndKeys:
@@ -77,77 +80,51 @@ NSString *kDevIdPref = @"developerKey";
 }
 
 
--(void)onOnlineEvent:(NSNotification*)notification
-{	
-  [self willChangeValueForKey:@"online"];
+- (void)onWimSessionConnectionStateChange:(NSNotification *)notification {
+
+  WimSession *session = [notification object];
+  ConnectionState state = [session connectionState];
+    
   [self willChangeValueForKey:@"connected"];
-
-  _connected = [wimSession connected];
+  [self willChangeValueForKey:@"online"];
   
-  [self didChangeValueForKey:@"connected"];
-  [self didChangeValueForKey:@"online"];
+  [self appendLog:[NSString stringWithFormat:@"%@:%d\n", [notification name], state]];
   
-  [self appendLog:[NSString stringWithFormat:@"%@\n", [notification name]]];
-}
-
--(void)onPresenceEvent:(NSNotification*)notification
-{
-  // WIM Events will contain a NSDictionary containing the data returned from the WIMServer
-  // you can valueForKeyPath to access these structures
-  
-	NSDictionary* buddy = [notification userInfo];
-	NSString *log = [NSString stringWithFormat:@"presenceEvent: %@ (%@)\n", [buddy objectForKey:@"displayId"], [buddy objectForKey:@"state"]];
-  [self appendLog:log];
-}
-
--(void)onBuddyListArrived:(NSNotification*)notification
-{
-  // WIM Events will contain a NSDictionary containing the data returned from the WIMServer
-  // you can valueForKeyPath to access these structures
-
-	NSString *log = [NSString stringWithFormat:@"buddyListArrived:\n"];
-  [self appendLog:log];
-  
-	// We don't want to fire presence events when we get a buddy list
-  NSDictionary *buddyList = [notification userInfo];
-  NSArray *groupsArray = [buddyList valueForKey:@"groups"];
-  NSEnumerator* buddyListGroups = [groupsArray objectEnumerator];
-  NSArray* buddyGroups;
-  
-  while ((buddyGroups = [buddyListGroups nextObject])) 
-  {
-    NSEnumerator *buddies = [[buddyGroups valueForKey:@"buddies"] objectEnumerator];
-    NSMutableDictionary *buddy;
-    NSString *log = [NSString stringWithFormat:@"Group: %@\n", [buddyGroups valueForKey:@"name"]];
-    [self appendLog:log];
-    while (buddy = [buddies nextObject])
-    {
-      log = [NSString stringWithFormat:@"buddyList: %@ (%@)\n", [buddy objectForKey:@"displayId"], [buddy objectForKey:@"state"]];
-      [self appendLog:log];
-    }
+  switch (state) {
+    case ConnectionState_Offline:
+      _connected = NO;
+      break;
+    case ConnectionState_Authenticating:
+      _connected = NO;
+      break;
+    case ConnectionState_Connecting:
+      _connected = NO;
+      break;
+    case ConnectionState_Reconnecting:
+      _connected = NO;
+      break;
+    case ConnectionState_Connected:
+      _connected = YES;
+      break;
+    default:
+      break;
   }
+
+  [self didChangeValueForKey:@"online"];
+  [self didChangeValueForKey:@"connected"];
+  
 }
+
+- (void)onWimSessionEnded:(NSNotification *)notification {
+	// This function is called when we receive an "endSession" event.
+  // including being remotely signed out via "AOL System Message"
+}
+
 
 -(void)onIMSentEvent:(NSNotification *)notification
 {
   [message setStringValue:@""];
 }
-
--(void)onIMReceivedEvent:(NSNotification *)notification
-{
-  // WIM Events will contain a NSDictionary containing the data returned from the WIMServer
-  // you can valueForKeyPath to access these structures
-
-  // send specific event to context
-  NSDictionary *imEvent = [notification userInfo];
-  NSString *fromAimId = [imEvent valueForKeyPath:@"eventData.source.aimId"];
-  NSString *messageText = [imEvent valueForKeyPath:@"eventData.message"];
-
-	NSString *log = [NSString stringWithFormat:@"%@->%@: %@\n", fromAimId, [wimSession aimId], messageText];
-  [self appendLog:log];
-  [message setStringValue:@""];
-}
-
 
 -(void)onWatchNotification:(NSNotification*)notification
 {
@@ -157,17 +134,16 @@ NSString *kDevIdPref = @"developerKey";
 -(void)awakeFromNib
 {
   // WimSession will post notifications as the session goes online and offline
-  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onOnlineEvent:) name:kWimClientSessionOnline object:wimSession];
-  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onOnlineEvent:) name:kWimClientSessionOffline object:wimSession];
+  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onWimSessionConnectionStateChange:) 
+                                               name:kWimClientConnectionStateChange object:nil];
+  
+  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onWimSessionEnded:) 
+																							 name:kWimSessionSessionEndedEvent object:nil];
 
-  // WIMSession (and others, see WimEvents.h for others) will post notifications as AIM events occur
-  // [NSNotification userInfo] will usually contain a NSDictionary which maps to WIM Event objects as documented at
+
   // http://dev.aol.com/aim/web/serverapi_reference
 
-  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onPresenceEvent:) name:kWimSessionPresenceEvent object:nil];	
   [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onIMSentEvent:) name:kWimClientIMSent object:nil];
-  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onIMReceivedEvent:) name:kWimSessionIMEvent object:nil];
-  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onBuddyListArrived:) name:kWimSessionBuddyListEvent object:nil];
   
   // load our default values
   NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
@@ -178,7 +154,7 @@ NSString *kDevIdPref = @"developerKey";
 
 - (IBAction)onSignOff:(id)sender
 {
-	[wimSession disconnect];
+	[wimSession signOff];
 }
 
 - (IBAction)onSignOn:(id)sender
@@ -301,6 +277,89 @@ NSString *kDevIdPref = @"developerKey";
   return _connected;
 }
 
+#pragma mark WimSession Delegate callbacks to handle Errors
+
+// Called when account specific logins are blocked
+- (void) wimSessionRateLimited:(WimSession *)aWimSession
+{
+  [self appendLog:@"***wimSessionRateLimited***\n"];
+}
+
+// Server error handler - a server on the backend is not responding properly
+- (void) wimSessionServerError:(WimSession *)aWimSession
+{
+  [self appendLog:@"***wimSessionServerError***\n"];
+}
+
+
+#pragma mark WimSession Delegate callbacks to handle Host events
+- (void) wimSession:(WimSession *)aWimSession receivedBuddyList:(NSDictionary *)aBuddyList
+{
+  // WIM Events will contain a NSDictionary containing the data returned from the WIMServer
+  // you can valueForKeyPath to access these structures
+  
+	NSString *log = [NSString stringWithFormat:@"buddyListArrived:\n"];
+  [self appendLog:log];
+  
+	// We don't want to fire presence events when we get a buddy list
+  NSArray *groupsArray = [aBuddyList valueForKey:@"groups"];
+  NSEnumerator* buddyListGroups = [groupsArray objectEnumerator];
+  NSArray* buddyGroups;
+  
+  while ((buddyGroups = [buddyListGroups nextObject])) 
+  {
+    NSEnumerator *buddies = [[buddyGroups valueForKey:@"buddies"] objectEnumerator];
+    NSMutableDictionary *buddy;
+    NSString *log = [NSString stringWithFormat:@"Group: %@\n", [buddyGroups valueForKey:@"name"]];
+    [self appendLog:log];
+    while (buddy = [buddies nextObject])
+    {
+      log = [NSString stringWithFormat:@"buddyList: %@ (%@)\n", [buddy objectForKey:@"displayId"], [buddy objectForKey:@"state"]];
+      [self appendLog:log];
+    }
+  }
+}
+- (void) wimSession:(WimSession *)aWimSession receivedPresenceEvent:(NSDictionary *)buddy
+{
+  // WIM Events will contain a NSDictionary containing the data returned from the WIMServer
+  // you can valueForKeyPath to access these structures
+	NSString *log = [NSString stringWithFormat:@"presenceEvent: %@ (%@)\n", [buddy displayName], [buddy state]];
+  [self appendLog:log];
+  
+}
+- (void) wimSession:(WimSession *)aWimSession receivedMyInfoEvent:(NSDictionary *)aMyInfoEvent
+{
+}
+- (void) wimSession:(WimSession *)aWimSession receivedTypingEvent:(NSDictionary *)aTypingEvent
+{
+}
+- (void) wimSession:(WimSession *)aWimSession receivedIMEvent:(NSDictionary *)aIMEvent
+{
+  // WIM Events will contain a NSDictionary containing the data returned from the WIMServer
+  // you can valueForKeyPath to access these structures
+  
+  // send specific event to context
+  NSString *fromAimId = [aIMEvent valueForKeyPath:@"eventData.source.aimId"];
+  NSString *messageText = [aIMEvent valueForKeyPath:@"eventData.message"];
+  
+	NSString *log = [NSString stringWithFormat:@"%@->%@: %@\n", fromAimId, [aWimSession aimId], messageText];
+  [self appendLog:log];
+  [message setStringValue:@""];
+}
+- (void) wimSession:(WimSession *)aWimSession receivedDataIMEvent:(NSDictionary *)aDataIMEvent
+{
+}
+- (void) wimSession:(WimSession *)aWimSession receivedSessionEndedEvent:(NSDictionary *)aSessionEndedEvent
+{
+}
+- (void) wimSession:(WimSession *)aWimSession receivedOfflineIMEvent:(NSDictionary *)aOfflineIMEvent
+{
+}
+- (void) wimSession:(WimSession *)aWimSession receivedHostBuddyInfoEvent:(NSDictionary *)aHostBuddyInfoEvent
+{
+}
+
+
 #pragma mark WimSession Delegate callbacks to handle special authentication events
 
 // These are secondary challenges sometimes required by the login server.  In the event of 
@@ -345,7 +404,7 @@ NSString *kDevIdPref = @"developerKey";
   }
   else
   {
-    [aWimSession disconnect];
+    [aWimSession signOff];
   }
   
   [captcha setStringValue:@""];
@@ -375,7 +434,7 @@ NSString *kDevIdPref = @"developerKey";
   }
   else
   {
-    [aWimSession disconnect];
+    [aWimSession signOff];
   }
   
   [challengePassword setStringValue:@""];
@@ -411,7 +470,7 @@ NSString *kDevIdPref = @"developerKey";
   }
   else
   {
-    [aWimSession disconnect];
+    [aWimSession signOff];
   }
   
   [securId setStringValue:@""];

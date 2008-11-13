@@ -15,7 +15,6 @@ Be sure to request a "WIM Key".
 \pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\ql\qnatural\pardirnatural
 
 \f2\fs26 \cf0 \
-\
 This WIMFramework is licensed under the New BSD license and includes code that is Copyright (c) 
 \f0\fs24 \cf2 \CocoaLigature0 2008 Stig Brautaset
 \f2\fs26 \cf0 \CocoaLigature1 \
@@ -25,15 +24,18 @@ This WIMFramework is licensed under the New BSD license and includes code that i
 JSON-Framework is available seprarately at http://code.google.com/p/json-framework  - thanks Stig!\
 \pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\ql\qnatural\pardirnatural
 \cf0 \CocoaLigature1 \
-\
 The WimSession is the only class that is publically exported from this framework.  Requests to the AIM network are implemented\
 by WimSession - most of the responses from the AIM network are implemented via NSNotification.\
+\
+This code is part of the AIM for iPhone release.   An future release will include an iPhone project to build a static library (since there is no support for 3rd Party frameworks on the iPhone).  You can use the source code found in this framework project in your iPhone projects as well as Macintosh projects.\
+\
 \
 Notification Names are defined in WimEvents.h.\
 \pard\tx280\pardeftab280\ql\qnatural\pardirnatural
 \cf0 \CocoaLigature0 \
-//So a typical pattern for using a feature of AIM is: register a listener for a WIM Event (here, kWimSessionPresenceEvent)\
-[[NSNotificationCenter defaultCenter] addObserver:\cf4 self\cf0  selector:\cf4 @selector\cf0 (onPresenceEvent:) name:kWimSessionPresenceEvent object:\cf4 nil\cf0 ];	\
+// You should include a delegate implementation of\
+\pard\tx280\pardeftab280\ql\qnatural\pardirnatural
+\cf4 @protocol\cf0  WimSessionDelegate <NSObject> for Wimsession events sent from the AIM backend\
 \
 // Here we make a request to the AIM network\
 - (\cf4 IBAction\cf0 )onPresence:(\cf4 id\cf0 )sender\
@@ -46,16 +48,16 @@ Notification Names are defined in WimEvents.h.\
 // the userInfo for most notifications includes a dictionary object which maps to the WIM Events\
 // see documention 
 \f1 \CocoaLigature1 http://dev.aol.com/aim/web/serverapi_reference\
+\pard\tx280\pardeftab280\ql\qnatural\pardirnatural
 
-\f0 \CocoaLigature0 \
--(\cf4 void\cf0 )onPresenceEvent:(NSNotification*)notification\
+\f0 \cf0 \CocoaLigature0 \
+- (\cf4 void\cf0 ) wimSession:(WimSession *)aWimSession receivedPresenceEvent:(NSDictionary *)buddy\
 \{\
   \cf2 // WIM Events will contain a NSDictionary containing the data returned from the WIMServer\cf0 \
   \cf2 // you can valueForKeyPath to access these structures\cf0 \
-  \
-	NSDictionary* buddy = [notification userInfo];\
-	NSString *log = [NSString stringWithFormat:\cf5 @"presenceEvent: %@ (%@)\\n"\cf0 , [buddy objectForKey:\cf5 @"displayId"\cf0 ], [buddy objectForKey:\cf5 @"state"\cf0 ]];\
+	NSString *log = [NSString stringWithFormat:\cf5 @"presenceEvent: %@ (%@)\\n"\cf0 , [buddy displayName], [buddy state]];\
   [\cf4 self\cf0  appendLog:log];\
+  \
 \}\
 \pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\ql\qnatural\pardirnatural
 \cf0 \CocoaLigature1 \

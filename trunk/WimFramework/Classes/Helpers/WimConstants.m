@@ -26,20 +26,33 @@ NSString* kUrlFetchTimeout = @"28000";
 
 NSString* kAuthOffMethod = @"auth/logout";
 
-NSString* kAPIBaseURL = @"http://api.oscar.aol.com/";
-NSString* kAuthBaseURL = @"https://api.screenname.aol.com/";
+
+NSString *kAPIBaseURL;
+NSString *kAuthBaseURL;
+
+NSString* kProdAPIBaseURL = @"http://api.oscar.aol.com/";
+NSString* kProdAuthBaseURL = @"https://api.screenname.aol.com/";
+
+NSString *kTestAPIBaseURL = @"http://reddev-l23.tred.aol.com:8000/";
+NSString *kTestAuthBaseURL = @"https://api-login.tred.aol.com/";
+
 
 NSString* kUrlGetClientLogin = @"%@auth/clientLogin"; // requires kAuthBaseURL
 
-NSString* kUrlStartSession = @"%@aim/startSession?f=json&r=dk=%@&a=%a"; // requires kAPIBaseURL, requestId, a
+NSString* kUrlStartSession = @"%@aim/startSession?%@&sig_sha256=%@"; // requires kAPIBaseURL, queryString, digital signature
 NSString* kUrlEndSession = @"%@aim/endSession?f=json&aimsid=%@"; // requires kAPIBaseURL, aimsid
-NSString* kUrlFetchRequest = @"%@&f=json&r=%d&timeout=%@ "; // requires: fetchBaseUrl, requestId, aimSid, timeout
-NSString* kUrlPresenceRequest = @"%@presence/get?f=json&k=%@&t=%@&awayMsg=1&profileMsg=1&emailLookup=1&location=1&memberSince=1"; // requires: kAPIBaseURL,  key, targetAimId
-NSString* kUrlSendIMRequest = @"%@im/sendIM?f=json&k=%@&a=%@&aimsid=%@&r=%d&message=%@&t=%@"; // requires: kAPIBaseURL, key, authtoken, aimSid,requestid,message, target
+NSString* kUrlFetchRequest = @"%@&f=json&r=%d&timeout=%d "; // requires: fetchBaseUrl, requestId, aimSid, timeout
+//NSString* kUrlPresenceRequest = @"%@presence/get?f=json&k=%@&t=%@&awayMsg=1&profileMsg=1&emailLookup=1&location=1&memberSince=1"; // requires: kAPIBaseURL,  key, targetAimId
+NSString* kUrlPresenceRequest = @"%@presence/get?f=json&k=%@&t=%@&awayMsg=1&profileMsg=1&statusMsg=1&friendly=1"; // requires: kAPIBaseURL,  key, targetAimId
+NSString* kUrlSendIMRequest = @"%@im/sendIM?f=json&k=%@&a=%@&aimsid=%@&r=%d&message=%@&t=%@&autoResponse=%@&offlineIM=%@"; // requires: kAPIBaseURL, key, authtoken, aimSid,requestid,message, target, autoResponse, offlineIM
+NSString* kUrlSendDataIM = @"%@im/sendDataIM?f=json&k=%@&a=%@&aimsid=%@&r=%d&t=%@&cap=%@&type=%@&data=%@"; // requires: kAPIBaseURL, key, authtoken, aimSid,requestid,target,capability,type,data
 NSString *kUrlSetState = @"%@presence/setState?f=json&k=%@&aimsid=%@&r=%d&view=%@"; // requires kAPIBaseURL, key, authtoken, requestid, state
 NSString *kUrlUploadExpression = @"%@expressions/upload?f=json&k=%@&a=%@&aimsid=%@&r=%d&type=%@"; // requires: kAPIBaseURL, key, authtoken, aimSid, requestid, expression type
-NSString *kUrlAddBuddy = @"%@buddylist/addBuddy?f=json&k=%@a=%@&aimsid=%@&r=%d&buddy=%@&group=%@"; // requires: kAPIBaseURL, key, authtoken, aimSid, requestid, newBuddy, groupName
-NSString *kUrlSetBuddyAttribute = @"%@buddylist/setBuddyAttribute?f=json&k=%@a=%@&aimsid=%@&r=%d&buddy=%@&friendly=%@"; // requires: kAPIBaseURL, key, authtoken, aimSid, requestid, aimId, friendlyName
+NSString *kUrlAddBuddy = @"%@buddylist/addBuddy?f=json&k=%@&a=%@&aimsid=%@&r=%d&buddy=%@&group=%@"; // requires: kAPIBaseURL, key, authtoken, aimSid, requestid, newBuddy, groupName
+NSString *kUrlSetBuddyAttribute = @"%@buddylist/setBuddyAttribute?f=json&k=%@&a=%@&aimsid=%@&r=%d&buddy=%@&friendly=%@"; // requires: kAPIBaseURL, key, authtoken, aimSid, requestid, aimId, friendlyName
+NSString *kUrlMoveGroup = @"%@buddylist/moveGroup?f=json&k=%@&a=%@&aimsid=%@&r=%d&group=%@&beforeGroup=%@"; // requires: kAPIBaseURL, key, authtoken, aimSid, requestid, groupName, beforeGroup
+NSString *kUrlRemoveGroup = @"%@buddylist/removeGroup?f=json&k=%@&a=%@&aimsid=%@&r=%d&group=%@"; // requires: kAPIBaseURL, key, authtoken, aimSid, requestid, group
+
 // Fetched Event
 NSString *kWimSessionMyInfoEvent = @"com.aol.aim.event.myInfoEvent";
 NSString *kWimSessionPresenceEvent = @"com.aol.aim.event.presenceEvent";
@@ -50,13 +63,11 @@ NSString *kWimSessionOfflineIMEvent = @"com.aol.aim.event.offineIMEvent";
 NSString *kWimSessionBuddyListEvent = @"com.aol.aim.event.buddyListEvent";
 NSString *kWimSessionSessionEndedEvent = @"com.aol.aim.event.sessionEndedEvent";
 NSString *kWimSessionHostBuddyInfoEvent = @"com.aol.aim.event.hostBuddyInfoEvent";
- 
-
 
 // Client Events
 NSString *kWimClientIMSent = @"com.aol.aim.client.imSent";
-NSString *kWimClientSessionOnline = @"com.aol.aim.client.session.online";
-NSString *kWimClientSessionOffline = @"com.aol.aim.client.session.offline";
+NSString *kWimClientConnectionStateChange = @"com.aol.aim.client.connectionchanged";
+
 
 // WIMRequest events
 NSString *kWimRequestDidStart = @"com.aol.aim.requestDidStart";
@@ -64,4 +75,8 @@ NSString *kWimRequestDidFinish = @"com.aol.aim.requestDidFinish";
 
 NSString *WimSessionBuddyInfoAimIdKey = @"WimSessionBuddyInfoAimId";
 NSString *WimSessionBuddyInfoHtmlKey = @"WimSessionBuddyInfoHtml";
+
+
+// capabilities for dataIM
+NSString* WimDataIMCapability_DirectIM = @"094613454c7f11d18222444553540000";
 

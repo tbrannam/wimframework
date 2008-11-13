@@ -17,55 +17,43 @@
  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#import "WimPlatform.h"
-#import "WimAdditions.h"
-#import "WimConstants.h"
+#import "NSDictionary+Group.h"
 
-@interface WimRequest : NSObject {
-  id delegate;
-  SEL action;
-  NSMutableData* data;
-  NSURLConnection*  urlConnection;
-  NSURLRequestCachePolicy cachePolicy;
-  NSMutableURLRequest *urlRequest;
-	NSURL *requestURL;
-  NSData *postData;
-  id userData;
-  BOOL synchronous;
-  float timeout;
-  int connectionStatus;
+
+@implementation NSDictionary (WIMGroup)
+
+- (NSArray*)buddies
+{
+  return [self valueForKey:@"buddies"];
 }
 
-+ (WimRequest *)wimRequest;
+- (NSString*)name
+{
+  return [self valueForKey:@"name"];
+}
 
-- (id)delegate;
-- (void)setDelegate:(id)delegate;
-
-- (void)setAction:(SEL)aSelector;
-- (SEL)action;
-
-- (void)setUserData:(id)userData;
-- (id)userData;
-- (NSData *)data;
-- (int)connectionStatus;
-
-- (void)setSynchronous:(BOOL)useOnlyForEndSession;
-
-- (void)requestURL:(NSURL *)url;
-- (void)requestURL:(NSURL *)url withData:(NSData *)data;
-
-- (void)cancelRequest;
-
-- (NSURLRequest *)urlRequest;
-
-- (void)setTimeout:(float)timeout;
-
-- (void)setCachePolicy:(NSURLRequestCachePolicy)cachePolicy;
-- (NSURLRequestCachePolicy)cachePolicy;
-
-@end
+- (BOOL)writeable
+{
+  if ([self valueForKey:@"smart"])
+    return NO;
+  
+  if ([[self name] isEqualToString:NSLocalizedString(@"Online", @"Buddy List Online Group")])
+    return NO;
+  
+  if ([[self name] isEqualToString:NSLocalizedString(@"Offline", @"Buddy List Offline Group")])
+    return NO;
+  
+  return YES;
+}
 
 
-@interface NSObject (KeyPathExtensions)
-- (NSString*) stringValueForKeyPath:(NSString*)keyPath;
+#if 0 // in the future we can use these to identify special groups and properties
+
+- (BOOL)localGroup
+{
+  return [self valueForKey:@"_localGroup"];
+}
+#endif
+
+
 @end

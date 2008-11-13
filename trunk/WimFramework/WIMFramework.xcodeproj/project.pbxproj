@@ -8,6 +8,11 @@
 
 /* Begin PBXBuildFile section */
 		59EC8A180DC79D15003FA9CC /* WimEvents.h in Headers */ = {isa = PBXBuildFile; fileRef = 59EC8A170DC79D15003FA9CC /* WimEvents.h */; settings = {ATTRIBUTES = (Public, ); }; };
+		5F799A1B0ECBB7AC006B5807 /* NSDictionary+Buddy.m in Sources */ = {isa = PBXBuildFile; fileRef = 5F799A180ECBB7AC006B5807 /* NSDictionary+Buddy.m */; };
+		5F799A1C0ECBB7AC006B5807 /* NSDictionary+Group.m in Sources */ = {isa = PBXBuildFile; fileRef = 5F799A1A0ECBB7AC006B5807 /* NSDictionary+Group.m */; };
+		5F799A720ECBC3C2006B5807 /* MLog.m in Sources */ = {isa = PBXBuildFile; fileRef = 5F799A120ECBB730006B5807 /* MLog.m */; };
+		5F799C4C0ECBCFDD006B5807 /* NSDictionary+Buddy.h in Headers */ = {isa = PBXBuildFile; fileRef = 5F799A170ECBB7AC006B5807 /* NSDictionary+Buddy.h */; settings = {ATTRIBUTES = (Public, ); }; };
+		5F799C4D0ECBCFDD006B5807 /* NSDictionary+Group.h in Headers */ = {isa = PBXBuildFile; fileRef = 5F799A190ECBB7AC006B5807 /* NSDictionary+Group.h */; settings = {ATTRIBUTES = (Public, ); }; };
 		5F8EC3BC0DFEE2B300D72F15 /* Read Me.rtf in Resources */ = {isa = PBXBuildFile; fileRef = 5F8EC3BB0DFEE2B300D72F15 /* Read Me.rtf */; };
 		5FD9949F0E228FF000787BCE /* WIMFramework.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8DC2EF5B0486A6940098B216 /* WIMFramework.framework */; };
 		5FD994B10E22904800787BCE /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 5FD994610E228E1E00787BCE /* main.m */; };
@@ -21,10 +26,8 @@
 		5FEB93140DF978D600B17ACA /* WimPlatform.h in Headers */ = {isa = PBXBuildFile; fileRef = 5FEB93020DF978D600B17ACA /* WimPlatform.h */; settings = {ATTRIBUTES = (Public, ); }; };
 		5FEB93150DF978D600B17ACA /* WimAdditions.h in Headers */ = {isa = PBXBuildFile; fileRef = 5FEB93030DF978D600B17ACA /* WimAdditions.h */; };
 		5FEB93160DF978D600B17ACA /* NSDataAdditions.m in Sources */ = {isa = PBXBuildFile; fileRef = 5FEB93040DF978D600B17ACA /* NSDataAdditions.m */; };
-		5FEB93170DF978D600B17ACA /* MLog.m in Sources */ = {isa = PBXBuildFile; fileRef = 5FEB93050DF978D600B17ACA /* MLog.m */; };
 		5FEB93180DF978D600B17ACA /* NSDataAdditions.h in Headers */ = {isa = PBXBuildFile; fileRef = 5FEB93060DF978D600B17ACA /* NSDataAdditions.h */; };
-		5FEB93190DF978D600B17ACA /* MLog.h in Headers */ = {isa = PBXBuildFile; fileRef = 5FEB93070DF978D600B17ACA /* MLog.h */; };
-		5FEB931E0DF978D600B17ACA /* ClientLogin+Private.h in Headers */ = {isa = PBXBuildFile; fileRef = 5FEB930C0DF978D600B17ACA /* ClientLogin+Private.h */; };
+		5FEB931E0DF978D600B17ACA /* ClientLogin+Private.h in Headers */ = {isa = PBXBuildFile; fileRef = 5FEB930C0DF978D600B17ACA /* ClientLogin+Private.h */; settings = {ATTRIBUTES = (); }; };
 		5FEB931F0DF978D600B17ACA /* ClientLogin.m in Sources */ = {isa = PBXBuildFile; fileRef = 5FEB930D0DF978D600B17ACA /* ClientLogin.m */; };
 		5FEB93200DF978D600B17ACA /* ClientLogin.h in Headers */ = {isa = PBXBuildFile; fileRef = 5FEB930E0DF978D600B17ACA /* ClientLogin.h */; };
 		5FEB93230DF978EC00B17ACA /* WimSession.m in Sources */ = {isa = PBXBuildFile; fileRef = 5FEB93210DF978EC00B17ACA /* WimSession.m */; };
@@ -47,7 +50,7 @@
 			isa = PBXContainerItemProxy;
 			containerPortal = 0867D690FE84028FC02AAC07 /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = 8DC2EF4F0486A6940098B216 /* WIMFramework */;
+			remoteGlobalIDString = 8DC2EF4F0486A6940098B216;
 			remoteInfo = WIMFramework;
 		};
 /* End PBXContainerItemProxy section */
@@ -60,8 +63,14 @@
 		32DBCF5E0370ADEE00C91783 /* AimWimFramework_Prefix.pch */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = AimWimFramework_Prefix.pch; sourceTree = "<group>"; };
 		59EC899E0DC77368003FA9CC /* exports */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = text; path = exports; sourceTree = "<group>"; };
 		59EC8A170DC79D15003FA9CC /* WimEvents.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = WimEvents.h; sourceTree = "<group>"; };
+		5F799A110ECBB730006B5807 /* MLog.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = MLog.h; sourceTree = "<group>"; };
+		5F799A120ECBB730006B5807 /* MLog.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = MLog.m; sourceTree = "<group>"; };
+		5F799A170ECBB7AC006B5807 /* NSDictionary+Buddy.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "NSDictionary+Buddy.h"; path = "Classes/NSDictionary+Buddy.h"; sourceTree = "<group>"; };
+		5F799A180ECBB7AC006B5807 /* NSDictionary+Buddy.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = "NSDictionary+Buddy.m"; path = "Classes/NSDictionary+Buddy.m"; sourceTree = "<group>"; };
+		5F799A190ECBB7AC006B5807 /* NSDictionary+Group.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "NSDictionary+Group.h"; path = "Classes/NSDictionary+Group.h"; sourceTree = "<group>"; };
+		5F799A1A0ECBB7AC006B5807 /* NSDictionary+Group.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = "NSDictionary+Group.m"; path = "Classes/NSDictionary+Group.m"; sourceTree = "<group>"; };
 		5F8EC3BB0DFEE2B300D72F15 /* Read Me.rtf */ = {isa = PBXFileReference; lastKnownFileType = text.rtf; path = "Read Me.rtf"; sourceTree = "<group>"; };
-		5FD994520E228D9D00787BCE /* TestHarness.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; name = TestHarness.app; path = build/Debug/TestHarness.app; sourceTree = "<group>"; };
+		5FD994520E228D9D00787BCE /* TestHarness.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TestHarness.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		5FD994540E228D9D00787BCE /* TestHarness-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "TestHarness-Info.plist"; sourceTree = "<group>"; };
 		5FD994610E228E1E00787BCE /* main.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = main.m; path = ../WimFrameworkHarness/main.m; sourceTree = "<group>"; };
 		5FD994620E228E1E00787BCE /* WimWindowController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = WimWindowController.h; path = ../WimFrameworkHarness/WimWindowController.h; sourceTree = "<group>"; };
@@ -75,9 +84,7 @@
 		5FEB93020DF978D600B17ACA /* WimPlatform.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = WimPlatform.h; sourceTree = "<group>"; };
 		5FEB93030DF978D600B17ACA /* WimAdditions.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = WimAdditions.h; path = Classes/Helpers/WimAdditions.h; sourceTree = SOURCE_ROOT; };
 		5FEB93040DF978D600B17ACA /* NSDataAdditions.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = NSDataAdditions.m; path = Classes/Helpers/NSDataAdditions.m; sourceTree = SOURCE_ROOT; };
-		5FEB93050DF978D600B17ACA /* MLog.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = MLog.m; path = Classes/Helpers/MLog.m; sourceTree = SOURCE_ROOT; };
 		5FEB93060DF978D600B17ACA /* NSDataAdditions.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = NSDataAdditions.h; path = Classes/Helpers/NSDataAdditions.h; sourceTree = SOURCE_ROOT; };
-		5FEB93070DF978D600B17ACA /* MLog.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = MLog.h; path = Classes/Helpers/MLog.h; sourceTree = SOURCE_ROOT; };
 		5FEB930C0DF978D600B17ACA /* ClientLogin+Private.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "ClientLogin+Private.h"; path = "Classes/Helpers/ClientLogin+Private.h"; sourceTree = SOURCE_ROOT; };
 		5FEB930D0DF978D600B17ACA /* ClientLogin.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = ClientLogin.m; path = Classes/Helpers/ClientLogin.m; sourceTree = SOURCE_ROOT; };
 		5FEB930E0DF978D600B17ACA /* ClientLogin.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = ClientLogin.h; path = Classes/Helpers/ClientLogin.h; sourceTree = SOURCE_ROOT; };
@@ -129,10 +136,9 @@
 		0867D691FE84028FC02AAC07 /* AimWimFramework */ = {
 			isa = PBXGroup;
 			children = (
-				5FD9945F0E228E0800787BCE /* TestHarness */,
 				5F8EC3BB0DFEE2B300D72F15 /* Read Me.rtf */,
+				5FD9945F0E228E0800787BCE /* TestHarness */,
 				08FB77AEFE84172EC02AAC07 /* Classes */,
-				32C88DFF0371C24200C91783 /* Other Sources */,
 				089C1665FE841158C02AAC07 /* Resources */,
 				0867D69AFE84028FC02AAC07 /* External Frameworks and Libraries */,
 				034768DFFF38A50411DB9C8B /* Products */,
@@ -162,10 +168,15 @@
 		08FB77AEFE84172EC02AAC07 /* Classes */ = {
 			isa = PBXGroup;
 			children = (
+				5F799A170ECBB7AC006B5807 /* NSDictionary+Buddy.h */,
+				5F799A180ECBB7AC006B5807 /* NSDictionary+Buddy.m */,
+				5F799A190ECBB7AC006B5807 /* NSDictionary+Group.h */,
+				5F799A1A0ECBB7AC006B5807 /* NSDictionary+Group.m */,
 				5FEB93210DF978EC00B17ACA /* WimSession.m */,
 				5FEB93220DF978EC00B17ACA /* WimSession.h */,
 				59EC8A170DC79D15003FA9CC /* WimEvents.h */,
 				59EC88E40DC7615A003FA9CC /* Helpers */,
+				32C88DFF0371C24200C91783 /* Other Sources */,
 				59EC88DD0DC7615A003FA9CC /* JSON */,
 			);
 			name = Classes;
@@ -192,6 +203,8 @@
 		32C88DFF0371C24200C91783 /* Other Sources */ = {
 			isa = PBXGroup;
 			children = (
+				5F799A110ECBB730006B5807 /* MLog.h */,
+				5F799A120ECBB730006B5807 /* MLog.m */,
 				32DBCF5E0370ADEE00C91783 /* AimWimFramework_Prefix.pch */,
 			);
 			name = "Other Sources";
@@ -225,9 +238,7 @@
 				5FEB93020DF978D600B17ACA /* WimPlatform.h */,
 				5FEB93030DF978D600B17ACA /* WimAdditions.h */,
 				5FEB93040DF978D600B17ACA /* NSDataAdditions.m */,
-				5FEB93050DF978D600B17ACA /* MLog.m */,
 				5FEB93060DF978D600B17ACA /* NSDataAdditions.h */,
-				5FEB93070DF978D600B17ACA /* MLog.h */,
 				5FEB930C0DF978D600B17ACA /* ClientLogin+Private.h */,
 				5FEB930D0DF978D600B17ACA /* ClientLogin.m */,
 				5FEB930E0DF978D600B17ACA /* ClientLogin.h */,
@@ -255,13 +266,14 @@
 			isa = PBXHeadersBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5F799C4C0ECBCFDD006B5807 /* NSDictionary+Buddy.h in Headers */,
+				5F799C4D0ECBCFDD006B5807 /* NSDictionary+Group.h in Headers */,
 				59EC8A180DC79D15003FA9CC /* WimEvents.h in Headers */,
 				5FEB930F0DF978D600B17ACA /* WimRequest.h in Headers */,
 				5FEB93110DF978D600B17ACA /* WimConstants.h in Headers */,
 				5FEB93140DF978D600B17ACA /* WimPlatform.h in Headers */,
 				5FEB93150DF978D600B17ACA /* WimAdditions.h in Headers */,
 				5FEB93180DF978D600B17ACA /* NSDataAdditions.h in Headers */,
-				5FEB93190DF978D600B17ACA /* MLog.h in Headers */,
 				5FEB931E0DF978D600B17ACA /* ClientLogin+Private.h in Headers */,
 				5FEB93200DF978D600B17ACA /* ClientLogin.h in Headers */,
 				5FEB93240DF978EC00B17ACA /* WimSession.h in Headers */,
@@ -359,6 +371,8 @@
 			files = (
 				5FD994B10E22904800787BCE /* main.m in Sources */,
 				5FD994B20E22904900787BCE /* WimWindowController.m in Sources */,
+				5F799A1B0ECBB7AC006B5807 /* NSDictionary+Buddy.m in Sources */,
+				5F799A1C0ECBB7AC006B5807 /* NSDictionary+Group.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -370,13 +384,13 @@
 				5FEB93120DF978D600B17ACA /* WimConstants.m in Sources */,
 				5FEB93130DF978D600B17ACA /* WimAdditions.m in Sources */,
 				5FEB93160DF978D600B17ACA /* NSDataAdditions.m in Sources */,
-				5FEB93170DF978D600B17ACA /* MLog.m in Sources */,
 				5FEB931F0DF978D600B17ACA /* ClientLogin.m in Sources */,
 				5FEB93230DF978EC00B17ACA /* WimSession.m in Sources */,
 				5FEB932E0DF978FD00B17ACA /* SBJSONScanner.m in Sources */,
 				5FEB93300DF978FD00B17ACA /* SBJSON.m in Sources */,
 				5FEB93310DF978FD00B17ACA /* NSString+SBJSON.m in Sources */,
 				5FEB93360DF978FD00B17ACA /* NSObject+SBJSON.m in Sources */,
+				5F799A720ECBC3C2006B5807 /* MLog.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -456,6 +470,9 @@
 		1DEB91B208733DA50010E9CD /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					LOGGING_ENABLED,
+				);
 				GCC_WARN_ABOUT_RETURN_TYPE = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				INSTALL_PATH = "";

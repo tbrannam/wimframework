@@ -23,34 +23,32 @@ extern NSString* kUrlPresenceRequest;
 
 extern NSString* kAPIBaseURL;
 extern NSString* kAuthBaseURL;
+
+extern NSString *kProdAPIBaseURL;
+extern NSString *kProdAuthBaseURL;
+
+extern NSString *kTestAPIBaseURL;
+extern NSString *kTestAuthBaseURL;
+
 extern NSString* kAuthOffMethod;
 extern NSString* kUrlStartSession;
 extern NSString* kUrlEndSession;
 extern NSString* kUrlSendIMRequest;
+extern NSString* kUrlSendDataIM;
 extern NSString *kUrlSetState;
 extern NSString *kUrlUploadExpression;
 extern NSString *kUrlAddBuddy;
 extern NSString *kUrlSetBuddyAttribute;
-
-// Fetched Event
-extern  NSString *kWimSessionMyInfoEvent;
-extern  NSString *kWimSessionPresenceEvent;
-extern  NSString *kWimSessionTypingEvent;
-extern  NSString *kWimSessionDataIMEvent;
-extern  NSString *kWimSessionIMEvent;
-extern  NSString *kWimSessionOfflineIMEvent;
-extern  NSString *kWimSessionBuddyListEvent;
-extern  NSString *kWimSessionSessionEndedEvent;
+extern NSString *kUrlMoveGroup;
+extern NSString *kUrlRemoveGroup;
 
 extern  NSString *kWimSessionHostBuddyInfoEvent;
 
-// WIMRequest events
-extern NSString *kWimRequestDidStart;
-extern NSString *kWimRequestDidFinish;
+
 
 // NSNotification UserInfo Dictionary Keys 
 extern NSString *WimSessionBuddyInfoAimIdKey;
 extern NSString *WimSessionBuddyInfoHtmlKey;
 
-#define BUDDY_NOTIFY(x,y) [NSString stringWithFormat:@"%@.%@", (x), (y)]
-
+// UUID capabilities that can be asserted for interoperability with other clients
+extern NSString* WimDataIMCapability_DirectIM;

@@ -20,13 +20,11 @@
 
 #import "WimSession.h"
 #import "WimRequest.h"
-#import "WimEvents.h"
 #import "ClientLogin.h"
 #import "ClientLogin+Private.h"
 #import "NSDataAdditions.h"
 #import "WimConstants.h"
 #import "JSON.h"
-
 #if MAC_OS_X_VERSION_MIN_REQUIRED > MAC_OS_X_VERSION_10_4
 #import <CommonCrypto/CommonHMAC.h>
 #else
@@ -35,33 +33,58 @@
 
 #import "MLog.h"
 
+
+//#define kUrlFetchTimeout = @"14000"; //14 seconds
+//#define kUrlFetchTimeout = @"28000"; //28 seconds
+//#define kUrlFetchTimeout = @"480000"; //8 minutes
+#define kUrlFetchTimeout 180000 // 3 minutes
+const int kHttpFetchTimeout = kUrlFetchTimeout / 1000 + 5;
+const int kSessionTimeout = 480; // 8 minutes
+
 WimSession* gDefaultSession = nil;
 
 @interface WimSession (PRIVATEAPI)
-- (BOOL)canRestartSession;
+- (void)setConnectionState:(ConnectionState)newConnectionState;
+- (void)connectionAuthenticate;
 - (void)requestTokenForName:(NSString*)screenName withPassword:(NSString*)password;
 - (void)startSession;
 - (void)endSession;
 - (void)onAimPresenceResponse:(NSNotification *)notification;
 - (void)setBuddyList:(NSDictionary *)buddyList;
-
+- (void)fetchEvents;
+- (BOOL)validateBuddyList;
+- (void)onWimEventFetchEvents:(WimRequest *)wimRequest withError:(NSError *)error;
+- (void)replyToProposal:(NSDictionary*)invitation withResponse:(NSString*)response; // isAutoResponse:(BOOL)isAutoResponse
 @end
 
 NSDictionary *WimSession_OnlineStateInts;
 NSDictionary *WimSession_OnlineStateStrings;
 
+
+
 @implementation WimSession
 
-+ (WimSession*) defaultSession
+@synthesize statusMessage = _statusMessage;
+@synthesize awayMessage = _awayMessage;
+@synthesize clientOrnament = _clientOrnament;
+
+- (int)nextRequestId
+{
+  return _WimRequestId++;
+}
+
++ (WimSession*)defaultSession
 {
   if (gDefaultSession == nil)
   {
+    MLog(@"Initializing a new global WimSession");
     gDefaultSession = [[WimSession alloc] init];
   }
   return gDefaultSession;
 }
 
 
+extern void IMLog(NSString *,...);
 
 + (void)initialize
 {
@@ -99,12 +122,40 @@ NSDictionary *WimSession_OnlineStateStrings;
   self = [super init];
   _userName = [[coder decodeObjectForKey:@"userName"] retain];
   _sessionKey = [[coder decodeObjectForKey:@"sessionKey"] retain];
+  _sessionId = [[coder decodeObjectForKey:@"sessionId"] retain];
   _authToken = [[coder decodeObjectForKey:@"authToken"] retain];
   _tokenExpiration = [[coder decodeObjectForKey:@"tokenExpiration"] retain];
-  
+	_buddyList = [[coder decodeObjectForKey:@"buddyList"] retain];
+  _passwordHash = [[coder decodeObjectForKey:@"passwordHash"] intValue];
+  _fetchUrl = [[coder decodeObjectForKey:@"reconnectUrl"] retain];
+  _WimRequestId = [[coder decodeObjectForKey:@"wimRequestId"] intValue];
+  _myInfo = [[coder decodeObjectForKey:@"myInfo"] retain];
+  _statusMessage = [[coder decodeObjectForKey:@"lastStatusMessage"] retain];
+  _awayMessage = [[coder decodeObjectForKey:@"lastAwayMessage"] retain];
+  _clockSkew = [[coder decodeObjectForKey:@"clockSkew"] doubleValue];
+
+  if ([self validateBuddyList] == NO)
+  {
+    [_buddyList release];
+    _buddyList = nil;
+    
+    [_sessionKey release];
+    _sessionKey = nil;
+    
+    [_fetchUrl release];
+    _fetchUrl = nil;
+  }
+
   // this seems wrong - perhaps defaultSession should be a property allowing the caller to specify which object is the defaultSession?
-  if (!gDefaultSession)
+  if (gDefaultSession != self)
+  {
+    //[self retain];
+    [gDefaultSession autorelease];
+    MLog(@"WimSession - old gDefaultSession: %d", [gDefaultSession retainCount]);
+    MLog(@"WimSession - new gDefaultSession: %d", [self retainCount]);
+    MLog(@"WimSession - replacing global with new WimSession object");
     gDefaultSession = self;
+  }
   
   return self;
 }
@@ -113,23 +164,36 @@ NSDictionary *WimSession_OnlineStateStrings;
 {
   [coder encodeObject:_userName forKey:@"userName"];
   [coder encodeObject:_sessionKey forKey:@"sessionKey"];
+  [coder encodeObject:_sessionId forKey:@"sessionId"];
   [coder encodeObject:_authToken forKey:@"authToken"];
   [coder encodeObject:_tokenExpiration forKey:@"tokenExpiration"];
+	[coder encodeObject:_buddyList forKey:@"buddyList"];
+  [coder encodeObject:[NSNumber numberWithInt:_passwordHash] forKey:@"passwordHash"];
+  [coder encodeObject:_fetchUrl forKey:@"reconnectUrl"];
+  [coder encodeObject:[NSNumber numberWithInt:_WimRequestId] forKey:@"wimRequestId"];
+  [coder encodeObject:_myInfo forKey:@"myInfo"];
+  [coder encodeObject:_statusMessage forKey:@"lastStatusMessage"];
+  [coder encodeObject:_awayMessage forKey:@"lastAwayMessage"];
+  [coder encodeObject:[NSNumber numberWithDouble:_clockSkew] forKey:@"clockSkew"];
 }
 
 - (void)dealloc 
 {
+  MLog(@"WimSession deallocing...");
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
   [_wimFetchRequest setDelegate:nil];
+  [_fetchUrl release];
   [_userName release];
   [_password release];
   [_sessionId release];
   [_authToken release];
-  [_fetchBaseUrl release];
   [_tokenExpiration release];
   [_clientLogin release];
   [_devID release];
   [_clientVersion release];
   [_clientName release];
+  [_capabilityUUIDs release];
+  [_clientOrnament release];
   
   if (self == gDefaultSession)
     gDefaultSession = nil;
@@ -178,12 +242,146 @@ NSDictionary *WimSession_OnlineStateStrings;
   _clientVersion = aClientVersion;
 }
 
+- (NSSet*)capabilityUUIDs
+{
+  return _capabilityUUIDs;
+}
+
+- (void)setCapabilityUUIDs:(NSSet *)aCapabilitySet
+{
+  // ++++ validate input in debug builds
+  [aCapabilitySet retain];
+  [_capabilityUUIDs release];
+  _capabilityUUIDs = aCapabilitySet;
+}
+
+- (BOOL)online
+{
+  // if internal state is reconnecting or connected
+  return ![self offline];
+}
+
+- (BOOL)offline
+{
+  // if internal state is logged out, authenticating or connecting
+  switch (connectionState) {
+    case ConnectionState_Offline:
+      return YES;
+    case ConnectionState_Authenticating:
+      return YES;
+    case ConnectionState_Connecting:
+      return YES;
+    case ConnectionState_Reconnecting:
+      return NO;
+    case ConnectionState_Connected:
+      return NO;
+    default:
+      MLog(@"Connection reached unknown state");
+      return NO;
+  }
+}
+
+- (ConnectionState)connectionState
+{
+  return connectionState;
+}
+
+- (BOOL)connected
+{
+  return self.connectionState > ConnectionState_Reconnecting;
+}
+
+- (BOOL)reconnecting
+{
+  return self.connectionState == ConnectionState_Reconnecting;
+}
 
 - (void)connect
 {
-  if ([self canRestartSession])
+  if (self.connectionState == ConnectionState_Offline)
+    [self setConnectionState:ConnectionState_Authenticating];
+}
+
+- (void)signOff
+{
+  // reset the connection such that we'll restart the ConnectionState state machine
+  [self resetSession];
+  [self endSession];
+}
+
+
+
+- (void)setConnectionState:(ConnectionState)aConnectionState
+{
+  ConnectionState previousState = connectionState;
+  connectionState = aConnectionState;
+  
+  switch (connectionState) {
+    case ConnectionState_Offline:
+      _sessionAttempt = 0;
+      [[NSNotificationCenter defaultCenter] postNotificationName:kWimClientConnectionStateChange object:self];
+      break;
+    case ConnectionState_Authenticating:
+      // Signing on...
+      _sessionAttempt = 0;
+      [self connectionAuthenticate];
+      break;
+    case ConnectionState_Connecting:
+    case ConnectionState_Reconnecting:
+      if (_fetchUrl==nil)
+      {
+        connectionState = ConnectionState_Connecting;
+        [[NSNotificationCenter defaultCenter] postNotificationName:kWimClientConnectionStateChange object:self];
+        // Connecting...
+        _sessionAttempt = 0;
+        [self startSession];
+      }
+      else
+      {
+        // Reconnecting...
+        connectionState = ConnectionState_Reconnecting;
+        [[NSNotificationCenter defaultCenter] postNotificationName:kWimClientConnectionStateChange object:self];
+        [self fetchEvents];
+      }
+      break;
+    case ConnectionState_Connected:
+      if (previousState != ConnectionState_Connected)
+        [[NSNotificationCenter defaultCenter] postNotificationName:kWimClientConnectionStateChange object:self];
+      break;
+    default:
+      MLog(@"continueConnection reached unknown state");
+      break;
+  }
+  
+}
+
+- (void)connectionAuthenticate
+{
+  NSString *user = [[self userName] lowercaseString];
+  NSString *aimId = [[[self myInfo] aimId] lowercaseString];
+  
+  BOOL validAimId = NO;
+  BOOL validPassword = NO;
+  BOOL validToken = NO;
+
+  if ([user isEqualToString:aimId] == YES)
   {
-    [self startSession];
+    validAimId = YES;
+  }
+  
+  if ([[self password] hash] == _passwordHash)
+  {
+    validPassword = YES ;
+  }
+  
+  if (_tokenExpiration && [[NSDate date] earlierDate:_tokenExpiration] && _authToken && _sessionKey)
+  {
+    validToken = YES;
+  }
+  
+  if (validAimId && validPassword && validToken)
+  {
+    [self setConnectionState:ConnectionState_Connecting];
   }
   else
   {
@@ -191,10 +389,13 @@ NSDictionary *WimSession_OnlineStateStrings;
     _clientLogin = [[ClientLogin alloc] init];
     [_clientLogin setDelegate:self];
     
+
     if ([_userName length])
     {
+
       if ([_password length])
       {
+        [[NSNotificationCenter defaultCenter] postNotificationName:kWimClientConnectionStateChange object:self];
         [self requestTokenForName:_userName withPassword:_password];
       }
       else
@@ -205,32 +406,19 @@ NSDictionary *WimSession_OnlineStateStrings;
     }
     else
     {
-      MLog(@"could not log on without username and password");
-      //TODO: fire Log off event
+      [self setConnectionState:ConnectionState_Offline];
     }
   }
 }
 
-- (BOOL)connected
-{
-  return _connected;
-}
-
-- (void)disconnect
-{
-  [_clientLogin release];
-   _clientLogin = nil;
-  
-  [self endSession];
-}
-
 - (void)answerChallenge:(NSString *)challengeAnswer
 {
-  if (![_password length])
+  
+  if ( [_userName isEqualToString:[_clientLogin screenName]] == NO || [_password length] == 0)
   {
     [_password autorelease];
     _password = [challengeAnswer copy];
-    [self connect];
+    [self setConnectionState:ConnectionState_Authenticating];
   }
   else
   {
@@ -238,13 +426,13 @@ NSDictionary *WimSession_OnlineStateStrings;
   }
 } 
 
-- (void)requestPresenceForAimId:(NSString*)aBuddyName 
+- (void)requestPresenceForAimId:(NSString*)aimId 
 {
   WimRequest *wimRequest = [WimRequest wimRequest];
   [wimRequest setDelegate:self];
   [wimRequest setAction:@selector(onWimEventPresenceResponse:withError:)];
-    
-  NSString* urlString = [NSString stringWithFormat:kUrlPresenceRequest, kAPIBaseURL, [[self devID] urlencode], aBuddyName];
+  
+  NSString* urlString = [NSString stringWithFormat:kUrlPresenceRequest, kAPIBaseURL, [[self devID] urlencode], [aimId urlencode]];
   NSURL *url = [NSURL URLWithString:urlString];
 
   [wimRequest setUserData:self];
@@ -253,10 +441,8 @@ NSDictionary *WimSession_OnlineStateStrings;
 
 - (void)requestBuddyInfoForAimId:(NSString*)aimId
 {
-  NSString *kUrlGetBuddyInfo = @"%@aim/getHostBuddyInfo?f=html&k=%@a=%@&aimsid=%@&r=%d&t=%@"; // requires: kAPIBaseURL, key, authtoken, aimSid, requestid, aimId
-  
-  NSString* urlString = [NSString stringWithFormat: kUrlGetBuddyInfo, kAPIBaseURL, [self devID], _authToken, _sessionId, [WimRequest nextRequestId], 
-                         [aimId stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding]];
+  NSString *kUrlGetBuddyInfo = @"%@aim/getHostBuddyInfo?f=html&t=%@&aimsid=%@"; // requires: kAPIBaseURL, aimId, aimSid
+  NSString* urlString = [NSString stringWithFormat: kUrlGetBuddyInfo, kAPIBaseURL, [aimId urlencode], _sessionId];
   
   NSURL *url = [NSURL URLWithString:urlString];
   
@@ -272,14 +458,16 @@ NSDictionary *WimSession_OnlineStateStrings;
 }
 
 
-// Add/Remove Buddies
-- (void)addBuddy:(NSString *)aimId withFriendlyName:(NSString *)friendlyName toGroup:(NSString *)groupName
+- (void)addBuddy:(NSString *)aimId toGroup:(NSString *)groupName thenInvoke:(NSInvocation *)aInvocation
 {
-  NSString *kUrlAddBuddy = @"%@buddylist/addBuddy?f=json&k=%@a=%@&aimsid=%@&r=%d&buddy=%@&group=%@"; // requires: kAPIBaseURL, key, authtoken, aimSid, requestid, newBuddy, groupName
-
-  NSString* urlString = [NSString stringWithFormat: kUrlAddBuddy, kAPIBaseURL, [self devID], _authToken, _sessionId, [WimRequest nextRequestId], 
-                         [aimId stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding], [groupName stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding]];
-
+  // looks like we need to do some additional encoding to handle SMS based aimId's
+  //NSString *encodedAimId =  [aimId urlencode];
+  
+  NSString *kUrlAddBuddy = @"%@buddylist/addBuddy?f=json&k=%@&a=%@&aimsid=%@&r=%d&buddy=%@&group=%@"; // requires: kAPIBaseURL, key, authtoken, aimSid, requestid, newBuddy, groupName
+  
+  NSString* urlString = [NSString stringWithFormat: kUrlAddBuddy, kAPIBaseURL, [self devID], _authToken, _sessionId, [self nextRequestId], 
+                         [aimId urlencode], [groupName urlencode]];
+  
   NSURL *url = [NSURL URLWithString:urlString];
   
   WimRequest *wimRequest = [WimRequest wimRequest];
@@ -287,19 +475,42 @@ NSDictionary *WimSession_OnlineStateStrings;
   [wimRequest setAction:@selector(onWimEventAddBuddyResponse:withError:)];
   
   MLog (@"fetching %@", urlString);
-  
-  NSArray *userData = [NSArray arrayWithObjects:aimId, friendlyName, nil];
-  
-  [wimRequest setUserData:userData];
+  if (aInvocation)
+  {
+    NSDictionary *userDictionary = [NSDictionary dictionaryWithObject:aInvocation forKey:@"delayedInvocation"];
+    [wimRequest setUserData:userDictionary];
+  }
   [wimRequest requestURL:url];
+}
+
+// Add/Remove Buddies
+- (void)addBuddy:(NSString *)aimId withFriendlyName:(NSString *)friendlyName toGroup:(NSString *)groupName
+{
+  NSInvocation *anInvocation = nil;
+
+  if (friendlyName)
+  {
+    SEL selector = @selector(setFriendlyName:toAimId:);
+    anInvocation = [NSInvocation invocationWithMethodSignature:[WimSession instanceMethodSignatureForSelector:selector]];
+    [anInvocation setSelector:selector];
+    [anInvocation retainArguments];
+    [anInvocation setTarget:self];
+    [anInvocation setArgument:&friendlyName atIndex:2];
+    [anInvocation setArgument:&aimId atIndex:3];
+  }
+  
+  [self addBuddy:aimId toGroup:groupName thenInvoke:anInvocation];
 }
 
 - (void)removeBuddy:(NSString *)aimId fromGroup:(NSString *)groupName
 {
-  NSString *kUrlRemoveBuddy = @"%@buddylist/removeBuddy?f=json&k=%@a=%@&aimsid=%@&r=%d&buddy=%@&group=%@"; // requires: kAPIBaseURL, key, authtoken, aimSid, requestid, newBuddy, groupName
+  // looks like we need to do some additional encoding to handle SMS based aimId's
+  //NSString *encodedAimId =  [aimId urlencode];
   
-  NSString* urlString = [NSString stringWithFormat: kUrlRemoveBuddy, kAPIBaseURL, [self devID], _authToken, _sessionId, [WimRequest nextRequestId], 
-                         [aimId stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding], [groupName stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding]];
+  NSString *kUrlRemoveBuddy = @"%@buddylist/removeBuddy?f=json&k=%@&a=%@&aimsid=%@&r=%d&buddy=%@&group=%@"; // requires: kAPIBaseURL, key, authtoken, aimSid, requestid, newBuddy, groupName
+  
+  NSString* urlString = [NSString stringWithFormat: kUrlRemoveBuddy, kAPIBaseURL, [self devID], _authToken, _sessionId, [self nextRequestId], 
+                         [aimId urlencode], [groupName urlencode]];
   
   NSURL *url = [NSURL URLWithString:urlString];
   
@@ -313,11 +524,29 @@ NSDictionary *WimSession_OnlineStateStrings;
   [wimRequest requestURL:url];
 }
 
+- (void)moveBuddy:(NSString *)aimId fromGroup:(NSString *)oldGroup toGroup:(NSString *)newGroup
+{
+  if (oldGroup && newGroup)
+  {
+    SEL selector = @selector(removeBuddy:fromGroup:);
+    NSInvocation *anInvocation;
+    anInvocation = [NSInvocation invocationWithMethodSignature:[WimSession instanceMethodSignatureForSelector:selector]];
+    [anInvocation setSelector:selector];
+    [anInvocation retainArguments];
+    [anInvocation setTarget:self];
+    [anInvocation setArgument:&aimId atIndex:2];
+    [anInvocation setArgument:&oldGroup atIndex:3];
+
+    [self addBuddy:aimId toGroup:newGroup thenInvoke:anInvocation];
+  }
+}
+
+
 
 - (void)setFriendlyName:(NSString*)friendlyName toAimId:(NSString*)aimId
 {
-  NSString* urlString = [NSString stringWithFormat: kUrlSetBuddyAttribute, kAPIBaseURL, [self devID], _authToken, _sessionId, [WimRequest nextRequestId], 
-                         [aimId stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding], [friendlyName stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding]];
+  NSString* urlString = [NSString stringWithFormat: kUrlSetBuddyAttribute, kAPIBaseURL, [self devID], _authToken, _sessionId, [self nextRequestId], 
+                         [aimId urlencode], [friendlyName urlencode]];
   
   NSURL *url = [NSURL URLWithString:urlString];
   
@@ -336,16 +565,16 @@ NSDictionary *WimSession_OnlineStateStrings;
   NSString* urlString;
   if (beforeGroup)
   {
-    NSString *kUrlMoveGroup = @"%@buddylist/moveGroup?f=json&k=%@a=%@&aimsid=%@&r=%d&group=%@&beforeGroup=%@"; // requires: kAPIBaseURL, key, authtoken, aimSid, requestid, groupName, beforeGroup
+    NSString *kUrlMoveGroup = @"%@buddylist/moveGroup?f=json&k=%@&a=%@&aimsid=%@&r=%d&group=%@&beforeGroup=%@"; // requires: kAPIBaseURL, key, authtoken, aimSid, requestid, groupName, beforeGroup
   
-    urlString = [NSString stringWithFormat: kUrlMoveGroup, kAPIBaseURL, [self devID], _authToken, _sessionId, [WimRequest nextRequestId], 
-                         [groupName stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding], [beforeGroup stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding]];
+    urlString = [NSString stringWithFormat: kUrlMoveGroup, kAPIBaseURL, [self devID], _authToken, _sessionId, [self nextRequestId], 
+                         [groupName urlencode], [beforeGroup urlencode]];
   }
   else
   {
-    NSString *kUrlMoveGroup = @"%@buddylist/moveGroup?f=json&k=%@a=%@&aimsid=%@&r=%d&group=%@"; // requires: kAPIBaseURL, key, authtoken, aimSid, requestid, groupName, beforeGroup
-    urlString = [NSString stringWithFormat: kUrlMoveGroup, kAPIBaseURL, [self devID], _authToken, _sessionId, [WimRequest nextRequestId], 
-                           [groupName stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding]];
+    NSString *kUrlMoveGroup = @"%@buddylist/moveGroup?f=json&k=%@&a=%@&aimsid=%@&r=%d&group=%@"; // requires: kAPIBaseURL, key, authtoken, aimSid, requestid, groupName, beforeGroup
+    urlString = [NSString stringWithFormat: kUrlMoveGroup, kAPIBaseURL, [self devID], _authToken, _sessionId, [self nextRequestId], 
+                           [groupName urlencode]];
   }
   
   NSURL *url = [NSURL URLWithString:urlString];
@@ -359,38 +588,108 @@ NSDictionary *WimSession_OnlineStateStrings;
   [wimRequest requestURL:url];
 }
 
+- (void)removeGroup:(NSString *)group
+{
+  NSString* urlString = [NSString stringWithFormat: kUrlRemoveGroup, kAPIBaseURL, [self devID], _authToken, _sessionId, [self nextRequestId], 
+                         [group urlencode]];
+  NSURL *url = [NSURL URLWithString:urlString];
 
+
+  WimRequest *wimRequest = [WimRequest wimRequest];
+  [wimRequest setDelegate:self];
+  [wimRequest setAction:@selector(onWimEventRemoveGroupResponse:withError:)];
+  
+  MLog (@"fetching %@", urlString);
+  [wimRequest setUserData:group];
+  [wimRequest requestURL:url];
+}
 
 - (void)sendInstantMessage:(NSString*)message toAimId:(NSString*)aimId
 {
-  NSString* urlString = [NSString stringWithFormat: kUrlSendIMRequest, kAPIBaseURL, [self devID], _authToken, _sessionId, [WimRequest nextRequestId], 
-      [message stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding], aimId];
+  [self sendInstantMessage:message toAimId:aimId isAutoResponse:NO sendOfflineIfNeeded:NO];
+}
+
+- (void)sendInstantMessage:(NSString*)message toAimId:(NSString*)aimId isAutoResponse:(BOOL)isAutoResponse sendOfflineIfNeeded:(BOOL)sendOfflineIfNeeded
+{
+  // looks like we need to do some additional encoding to handle SMS based aimId's
+  //NSString *encodedAimId =  [aimId urlencode];
+
+  // looks like we need to do some additional encoding to handle +
+  NSString* urlString = [NSString stringWithFormat: kUrlSendIMRequest, kAPIBaseURL, [self devID], _authToken, _sessionId, [self nextRequestId], 
+												 [[NSString stringWithFormat:@"<div>%@</div>", [NSString encodeHTMLEntities:message]] urlencode], [aimId urlencode], (isAutoResponse ? @"1" : @"0"),(sendOfflineIfNeeded ? @"1" : @"0")];
   
   NSURL *url = [NSURL URLWithString:urlString];
+  if (!url) { MLog(@"sendInstantMessage created invalid URL"); return;}
   
   //http://api.oscar.aol.com/im/sendIM?f=json&k=MYKEY&c=callback&aimsid=AIMSID&msg=Hi&t=ChattingChuck
   WimRequest *wimRequest = [WimRequest wimRequest];
   [wimRequest setDelegate:self];
   [wimRequest setAction:@selector(onWimEventIMSentResponse:withError:)];
-
+  
+  
+  NSDictionary *dictionary = [NSDictionary dictionaryWithObjectsAndKeys:
+                              message, @"message", 
+                              aimId, @"aimId", 
+                              [NSNumber numberWithBool:isAutoResponse], @"autoresponse", 
+                              [NSNumber numberWithBool:sendOfflineIfNeeded], @"sendOffline", nil];
+  
   MLog (@"fetching %@", urlString);
-  [wimRequest setUserData:aimId];
+  [wimRequest setUserData:dictionary];
+  [wimRequest requestURL:url];
+}
+- (void)acceptProposal:(NSDictionary*)invitation // isAutoResponse:(BOOL)isAutoResponse
+{
+  [self replyToProposal:invitation withResponse:@"accept"];
+}
+
+- (void)denyProposal:(NSDictionary*)invitation // isAutoResponse:(BOOL)isAutoResponse
+{
+  [self replyToProposal:invitation withResponse:@"deny"];
+}
+
+- (void)replyToProposal:(NSDictionary*)invitation withResponse:(NSString*)response // isAutoResponse:(BOOL)isAutoResponse
+{
+  // NSString* kUrlSendDataIM = @"%@im/sendDataIM?f=json&k=%@&a=%@&aimsid=%@&r=%d&&t=%@&cap=%@&type=%@&data=%@";
+  // requires: kAPIBaseURL, key, authtoken, aimSid,requestid,target,capability,type,data
+  
+  NSMutableString* urlString = [NSMutableString stringWithFormat: kUrlSendDataIM, kAPIBaseURL, [self devID], _authToken, _sessionId, [self nextRequestId],
+                         [invitation valueForKeyPath:@"eventData.source.aimId"], // ++++ need to re-encode target screenname?
+                         [invitation valueForKeyPath:@"eventData.dataCapability"],
+                         response,
+                         @"x"]; // the data argument is required, although I don't think it is useful here
+  
+  // These are appended because I'm not yet sure that they are always required.
+  // if anything is always required, it should be added to kUrlSendDataIM
+  [urlString appendFormat:@"&cookie=%@", [invitation valueForKeyPath:@"eventData.cookie"]];
+  [urlString appendFormat:@"&sequenceNum=%@", [invitation valueForKeyPath:@"eventData.sequenceNum"]];
+  
+  NSURL *url = [NSURL URLWithString:urlString];
+  if (!url) { MLog(@"replyToProposal created invalid URL"); return;}
+  
+  WimRequest *wimRequest = [WimRequest wimRequest];
+  [wimRequest setDelegate:self];
+  [wimRequest setAction:@selector(onWimEventProposalReplySentResponse:withError:)];
+  
+  // I don't think we need to create a dictionary, then
+  // [wimRequest setUserData:dictionary];
+  
+  MLog (@"fetching %@", urlString);
   [wimRequest requestURL:url];
 }
 
 
-- (void)setState:(enum OnlineState)onlineState withMessage:(NSString *)message
+- (void)setState:(OnlineState)onlineState withMessage:(NSString *)message
 {
   //http://api.oscar.aol.com/presence/setState?f=json&k=MYKEY&c=callback&aimsid=AIMSID&view=away&away=Gone
   NSString *stateString = [WimSession_OnlineStateStrings valueForKey:[NSString stringWithFormat:@"%d", onlineState]];
   
   NSString *kUrlSetState = @"%@presence/setState?f=json&aimsid=%@&r=%d&view=%@"; // requires kAPIBaseURL, authtoken, requestid, state
 
-  NSMutableString* urlString = [NSMutableString stringWithString:[NSString stringWithFormat: kUrlSetState, kAPIBaseURL, _sessionId, [WimRequest nextRequestId], stateString]];
+  NSMutableString* urlString = [NSMutableString stringWithString:[NSString stringWithFormat: kUrlSetState, kAPIBaseURL, _sessionId, [self nextRequestId], stateString]];
 
   if (onlineState == OnlineState_away && message)
   {
-    [urlString appendFormat:@"&away=%@", [[message stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding] urlencode]];
+    [urlString appendFormat:@"&away=%@", [message urlencode]];
   }
   
   NSURL *url = [NSURL URLWithString:urlString];
@@ -404,16 +703,25 @@ NSDictionary *WimSession_OnlineStateStrings;
 }
 
 - (void)setStatus:(NSString *)message
-{
+{  
   NSMutableString *queryString = [[[NSMutableString alloc] init] autorelease];
   [queryString appendValue:@"json" forName:@"f"];
-  [queryString appendValue:[NSString stringWithFormat:@"%d", [WimRequest nextRequestId]] forName:@"r"];
+  [queryString appendValue:[NSString stringWithFormat:@"%d", [self nextRequestId]] forName:@"r"];
   [queryString appendValue:_sessionId forName:@"aimsid"];
-  //[queryString appendValue:message forName:@"statusMsg"];
-  [queryString appendFormat:@"&statusMsg=%@", [[message stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding] urlencode]];
+  if (message)
+  {
+   // [queryString appendValue:message forName:@"statusMsg"];
+   // [queryString appendFormat:@"&statusMsg=%@", [[message stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding] urlencode]];
+    [queryString appendFormat:@"&statusMsg=%@", [message urlencode]];
+
+  }
+  else
+  {
+    [queryString appendString:@"&statusMsg="];
+  }
 
   
-  NSString *urlString = [NSMutableString stringWithFormat:@"http://api.oscar.aol.com/presence/setStatus?%@", queryString];
+  NSString *urlString = [NSMutableString stringWithFormat:@"%@presence/setStatus?%@", kAPIBaseURL, queryString];
   NSURL *url = [NSURL URLWithString:urlString];
   
   WimRequest *wimRequest = [WimRequest wimRequest];
@@ -428,12 +736,12 @@ NSDictionary *WimSession_OnlineStateStrings;
 {
   NSMutableString *queryString = [[[NSMutableString alloc] init] autorelease];
   [queryString appendValue:@"json" forName:@"f"];
-  [queryString appendValue:[NSString stringWithFormat:@"%d", [WimRequest nextRequestId]] forName:@"r"];
+  [queryString appendValue:[NSString stringWithFormat:@"%d", [self nextRequestId]] forName:@"r"];
   [queryString appendValue:_sessionId forName:@"aimsid"];
-  //[queryString appendValue:message forName:@"profile"];
-  [queryString appendFormat:@"&profile=%@", [[message stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding] urlencode]];
+  //[queryString appendFormat:@"&profile=%@", [message urlencode]];
+  [queryString appendValue:message forName:@"profile"];
 
-  NSString *urlString = [NSMutableString stringWithFormat:@"http://api.oscar.aol.com/presence/setProfile?%@", queryString];
+  NSString *urlString = [NSMutableString stringWithFormat:@"%@presence/setProfile?%@", kAPIBaseURL, queryString];
   NSURL *url = [NSURL URLWithString:urlString];
   
   WimRequest *wimRequest = [WimRequest wimRequest];
@@ -449,7 +757,7 @@ NSDictionary *WimSession_OnlineStateStrings;
 - (void)setLargeBuddyIcon:(NSData*)iconData
 {
   // requires: kAPIBaseURL, key, authtoken, aimSid, requestid, expression type
-  NSString* urlString = [NSString stringWithFormat: kUrlUploadExpression, kAPIBaseURL, [self devID], _authToken, _sessionId, [WimRequest nextRequestId], 
+  NSString* urlString = [NSString stringWithFormat: kUrlUploadExpression, kAPIBaseURL, [self devID], _authToken, _sessionId, [self nextRequestId], 
                         @"buddyIcon"];
   
   NSURL *url = [NSURL URLWithString:urlString];
@@ -462,6 +770,28 @@ NSDictionary *WimSession_OnlineStateStrings;
   [wimRequest requestURL:url withData:iconData];
 }
 
+- (void)setExpresssion:(NSString *)expressionId
+{
+  
+  NSString *kUrlSetExpression = @"%@expressions/set?f=json&k=%@&a=%@&aimsid=%@&r=%d&type=%@&id=%@";
+  
+  // requires: kAPIBaseURL, key, authtoken, aimSid, requestid, expression type, expression id
+  
+  NSString* urlString = [NSString stringWithFormat: kUrlSetExpression, kAPIBaseURL, [self devID], _authToken, _sessionId, [self nextRequestId], 
+                         @"buddyIcon", expressionId];
+  
+  NSURL *url = [NSURL URLWithString:urlString];
+  
+  WimRequest *wimRequest = [WimRequest wimRequest];
+  [wimRequest setDelegate:self];
+  [wimRequest setAction:@selector(onWimEventSetExpressionResponse:withError:)];
+  
+  MLog (@"posting %@", urlString);
+  [wimRequest requestURL:url];
+  
+}
+
+
 #pragma mark ClientLogin Delegate
 
 - (void) clientLoginRequiresChallenge:(ClientLogin *)aClientLogin
@@ -471,16 +801,21 @@ NSDictionary *WimSession_OnlineStateStrings;
   
   switch (code)
   {
+
     case 3011: // password challenge
+      [_password autorelease];
+      _password = @"";
       if ([_delegate respondsToSelector:@selector(wimSessionRequiresPassword:)])
         [_delegate performSelector:@selector(wimSessionRequiresPassword:) withObject:self];
       break;
     case 3012: // securid challenge
     case 3013: // securid seconde challenge
+
       if ([_delegate respondsToSelector:@selector(wimSessionRequiresChallenge:)])
         [_delegate performSelector:@selector(wimSessionRequiresChallenge:) withObject:self];
       break;
     case 3015: // captcha challenge
+
       if ([_delegate respondsToSelector:@selector(wimSessionRequiresCaptcha:url:)])
       {
         NSString *captchaURL = [NSString stringWithFormat:@"%@?devId=%@&f=image&context=%@", [aClientLogin challengeURL], [self devID], [aClientLogin challengeContext]];
@@ -496,8 +831,10 @@ NSDictionary *WimSession_OnlineStateStrings;
 
 - (void) clientLoginComplete:(ClientLogin *)aClientLogin
 {
-  _loginAttempt=0;
   MLog(@"onAimLoginEventTokenGranted");
+  
+  _passwordHash = [[self password] hash];
+ 
   [_sessionKey release];
   _sessionKey = [[aClientLogin sessionKey] retain];
   
@@ -508,44 +845,60 @@ NSDictionary *WimSession_OnlineStateStrings;
   NSDate *expirationDate = [NSDate dateWithTimeIntervalSinceNow:seconds];
   [_tokenExpiration release];
   _tokenExpiration = [expirationDate retain];
-
+  
+  _clockSkew = [aClientLogin clockSkew];
   
   // we are done with the client login
   [_clientLogin release];
   _clientLogin = nil;
   
-  
-  [self startSession];
 
+  [self setConnectionState:ConnectionState_Connecting];
 }
 
 - (void) clientLoginFailed:(ClientLogin *)aClientLogin
 {
-  // TODO: display error UI to user - allow application level to handle retrys
   MLog(@"onAimLoginEventTokenFailure");
-  _loginAttempt++;
-  if (_loginAttempt < 4)
-  {
-    // if login is failing - don't use cached credentials
-    if (_tokenExpiration)
-      NSLog(@"clientLoginFailed cached login failed");
-    [_tokenExpiration release];
-    _tokenExpiration = nil;
-    [_authToken release];
-    _authToken = nil;
-    [_sessionKey release];
-    _sessionKey = nil;
+  
+  // if login is failing - don't use cached credentials
+  [_tokenExpiration release];
+  _tokenExpiration = nil;
+  [_authToken release];
+  _authToken = nil;
+  [_sessionKey release];
+  _sessionKey = nil;
 
-    [self connect];
-  }
-  else
+  // we are done with the client login
+  [_clientLogin release];
+  _clientLogin = nil;
+  
+  [self setConnectionState:ConnectionState_Offline];
+}
+
+- (BOOL)validateBuddyList
+{
+  NSArray *buddyList = [_buddyList valueForKey:@"groups"];
+  NSEnumerator* buddyListGroups = [buddyList objectEnumerator];
+  NSArray* buddyGroup;
+  
+  while ((buddyGroup = [buddyListGroups nextObject])) 
   {
-    // we are done with the client login
-    [_clientLogin release];
-    _clientLogin = nil;
-    
-    _connected = NO;
+    NSEnumerator *buddies = [[buddyGroup valueForKey:@"buddies"] objectEnumerator];
+    NSMutableDictionary *buddy;
+    //NSString *groupName = [buddyGroup valueForKey:@"name"];
+    while (buddy = [buddies nextObject])
+    {
+      NSString *aimId = [buddy aimId];
+
+      if (aimId == nil)
+      {
+        MLog(@"buddy list validation failed from disk %@", buddy);
+        return NO;
+      }
+    }
   }
+  
+  return YES;
 }
 
 - (void)buddyListArrived
@@ -554,21 +907,20 @@ NSDictionary *WimSession_OnlineStateStrings;
 
   NSArray *buddyList = [_buddyList valueForKey:@"groups"];
   NSEnumerator* buddyListGroups = [buddyList objectEnumerator];
-  NSArray* buddyGroups;
+  NSArray* buddyGroup;
   
-  while ((buddyGroups = [buddyListGroups nextObject])) 
+  while ((buddyGroup = [buddyListGroups nextObject])) 
   {
-    NSEnumerator *buddies = [[buddyGroups valueForKey:@"buddies"] objectEnumerator];
+    NSEnumerator *buddies = [[buddyGroup valueForKey:@"buddies"] objectEnumerator];
     NSMutableDictionary *buddy;
-    NSString *groupName = [buddyGroups valueForKey:@"name"];
+    NSString *groupName = [buddyGroup valueForKey:@"name"];
     while (buddy = [buddies nextObject])
     {
       [buddy setObject:groupName forKey:@"_group"];
     }
   }
 
-  [[NSNotificationCenter defaultCenter] postNotificationName:kWimSessionBuddyListEvent object:self userInfo:_buddyList];
-
+  [_delegate wimSession:self receivedBuddyList:_buddyList];
 }
 
 - (void)updateBuddyListWithBuddy:(NSDictionary*)newBuddyInfo
@@ -587,23 +939,13 @@ NSDictionary *WimSession_OnlineStateStrings;
     while (buddy = [buddies nextObject])
     {
       // fire presence events for existing UI - allowing prexisting UI to update state
-      if ( [[buddy stringValueForKeyPath:@"aimId"] isEqual:[newBuddyInfo stringValueForKeyPath:@"aimId"]] ) 
+      if ( [buddy isEqualToBuddy:newBuddyInfo] ) 
       {
-        // We found the same aimID, so let's update the contents of this NSMutableDictionary to reflect the new status...
-        
-        NSString *currentGroup = [[buddy objectForKey:@"_group"] retain];
-        [buddy removeAllObjects];
-        [buddy addEntriesFromDictionary:newBuddyInfo];
-        [buddy setObject:currentGroup forKey:@"_group"];
-        [currentGroup release];
-
-        [[NSNotificationCenter defaultCenter]  postNotificationName:kWimSessionPresenceEvent object:self userInfo:buddy];
+        [buddy updateBuddy:newBuddyInfo];
+        [_delegate wimSession:self receivedPresenceEvent:buddy];
       }
     }
   }
-  
-	// We don't want to fire a buddy list event when we just update presence. this causes a lot of recalculations in the table view
-  //[[NSNotificationCenter defaultCenter] postNotificationName:kWimSessionBuddyListEvent object:self userInfo:_buddyList];
 }
 
 
@@ -620,12 +962,35 @@ NSDictionary *WimSession_OnlineStateStrings;
     NSString* type = [event stringValueForKeyPath:@"type"];
     if ([type isEqualToString:@"myInfo"])
     {
-      NSDictionary *buddy = [event valueForKey:@"eventData"];
-      NSLog(@"MyInfo: %@", buddy);
+
+      NSMutableDictionary *buddy = [event valueForKey:@"eventData"];
+      if (![buddy isKindOfClass:[NSMutableDictionary class]] )
+      {
+        buddy = [buddy mutableCopy];
+      }
+      MLog(@"MyInfo: %@", buddy);
+
+      if ([[buddy valueForKey:@"invisible"] intValue] == 0 && ![[_myInfo state] isEqualToString:@"invisible"]) // reset state after invisibility turns off remotely
+      {
+        [buddy setValue:[_myInfo state] forKey:@"state"];
+
+        if ([buddy awayMsg])
+        {
+          [_awayMessage release];
+          _awayMessage = [[buddy awayMsg] copy]; //awayMsg contains xhtml
+
+        }
+        else
+        {
+          [_statusMessage release];
+          _statusMessage = [[NSString decodeHTMLEntities:[buddy statusMsg]] retain];
+        }
+      }
       
       [_myInfo release];
       _myInfo = [buddy retain];
-      [[NSNotificationCenter defaultCenter]  postNotificationName:kWimSessionMyInfoEvent object:self userInfo:buddy];
+
+      [_delegate wimSession:self receivedMyInfoEvent:buddy];
     }
     else if ([type isEqualToString:@"presence"]) 
     {
@@ -639,31 +1004,40 @@ NSDictionary *WimSession_OnlineStateStrings;
     else if ([type isEqualToString:@"typing"]) 
     {
       NSDictionary *buddy = [event valueForKey:@"eventData"];
-      [[NSNotificationCenter defaultCenter]  postNotificationName:kWimSessionTypingEvent object:self userInfo:buddy];
+      [_delegate wimSession:self receivedTypingEvent:buddy];
     }
     else if ([type isEqualToString:@"im"]) 
     {
-      NSString *aimId = [event stringValueForKeyPath:@"eventData.source.aimId"];
-      MLog(@"received IM %@", aimId);
-      [[NSNotificationCenter defaultCenter] postNotificationName:kWimSessionIMEvent object:self userInfo:(NSDictionary*)event];
+      MLog(@"received IM %@", [event stringValueForKeyPath:@"eventData.source.aimId"]);
+      [_delegate wimSession:self receivedIMEvent:(NSDictionary*)event];
     }
     else if ([type isEqualToString:@"dataIM"]) 
     {
-      [[NSNotificationCenter defaultCenter]  postNotificationName:kWimSessionDataIMEvent object:self userInfo:(NSDictionary*)event];
+      [_delegate wimSession:self receivedDataIMEvent:(NSDictionary*)event];
     }
-    else if ([type isEqualToString:@"endSession"]) 
+    else if ([type isEqualToString:@"sessionEnded"]) 
     {
       _pendingEndSession = YES;
-      [[NSNotificationCenter defaultCenter]  postNotificationName:kWimSessionSessionEndedEvent object:self userInfo:(NSDictionary*)event];
+      [_delegate wimSession:self receivedSessionEndedEvent:(NSDictionary*)event];
+      [self setConnectionState:ConnectionState_Offline];
     }
     else if ([type isEqualToString:@"offlineIM"]) 
     {
       // send generic handler out first - allowing application to create correct context
-      [[NSNotificationCenter defaultCenter] postNotificationName:kWimSessionOfflineIMEvent object:self userInfo:(NSDictionary*)event];
+      [_delegate wimSession:self receivedOfflineIMEvent:(NSDictionary*)event];
     }
   }
 }
 
+
+// for now we just reset things so we can try to reconnect -- after tearing down the connection
+- (void)resetSession
+{
+  [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(watchDog:) object:_wimFetchRequest];
+  _pendingEndSession = NO;
+  [_fetchUrl release];
+  _fetchUrl = nil;
+}
 
 #pragma mark Web API Interface
 /**
@@ -675,40 +1049,21 @@ NSDictionary *WimSession_OnlineStateStrings;
 
 - (void)requestTokenForName:(NSString*)screenName withPassword:(NSString*)password // andChallengeAnswer:(NSString*)answer
 {
-  if (_pendingEndSession==YES)
-  {
-    MLog(@"requestTokenForName aborted - due to session ending");
-    return;
-  }
-  
   MLog(@"Token expired - due to requesting fetch token");
   [_clientLogin requestSessionKey:screenName withPassword:password forceCaptcha:_forceCaptcha];
 }
 
-- (BOOL)canRestartSession
+//
+//  sha256:withPath:
+//
+//  This utility method takes the parameters of a WIM call you want to make, and creates the sha256 digest for the query you will send.
+//  it takes the kAPIBaseURL and appends the path (like "location/getPd") to it and then adds the query string in order to generate 
+//  the sha256 value.
+//
+//  WARNING:  DO NOT send in the full URL string in the query parameter.  And always make sure you send the parameters in alphabetical order!
+//
+- (NSString*) sha256:(NSString*)queryString withPath:(NSString*)path
 {
-  if (_tokenExpiration && [[NSDate date] earlierDate:_tokenExpiration] && _authToken && _sessionKey)
-  {
-    NSLog(@"canRestartSession YES");
-    return YES;
-  }
-
-  return NO;
-}
-
-// http://api.oscar.aol.com/aim/startSession
-- (void)startSession
-{
-  NSString *capabilities = @"myInfo,presence,buddylist,typing,im,offlineIM";
-  //NSString *capabilities = @"myInfo,presence,buddylist,typing,im,dataIM,offlineIM";
-  
-  NSMutableString *queryString;
-  
-  // Set up params in alphabetical order
-  queryString = [NSMutableString stringWithFormat:@"a=%@&clientName=%@&clientVersion=%@&events=%@&f=json&k=%@&ts=%d",
-                     _authToken, [_clientName urlencode], [_clientVersion urlencode], [capabilities urlencode],
-                     _devID, abs([[NSDate date] timeIntervalSince1970])];
-  
   CFStringRef encodedQueryStringRef = CFURLCreateStringByAddingPercentEscapes(NULL, (CFStringRef)queryString,
                                                                               NULL, (CFStringRef)@";/?:@&=+$,",
                                                                               kCFStringEncodingUTF8);
@@ -716,7 +1071,7 @@ NSDictionary *WimSession_OnlineStateStrings;
   NSString *encodedQueryString = [(NSString*)encodedQueryStringRef autorelease];
   
   // Generate OAuth Signature Base
-  NSString *temp = [[NSString stringWithFormat:@"%@%@", kAPIBaseURL, @"aim/startSession"] urlencode];
+  NSString *temp = [[NSString stringWithFormat:@"%@%@", kAPIBaseURL, path] urlencode];
   NSString *openAuthSignatureBase = [NSString stringWithFormat:@"GET&%@&%@", temp, encodedQueryString];
   
   MLog(@"AIMBaseURL %@   : ", kAPIBaseURL);
@@ -736,10 +1091,46 @@ NSDictionary *WimSession_OnlineStateStrings;
   // Append the sig_sha256 data
   CFStringRef encodedB64Ref = CFURLCreateStringByAddingPercentEscapes(NULL, (CFStringRef)baseSixtyFourHash,
                                                                       NULL, (CFStringRef)@";/?:@&=+$,", kCFStringEncodingUTF8);
-  NSString *encodedB64 = [(NSString*)encodedB64Ref autorelease];
+  return [(NSString*)encodedB64Ref autorelease];  
+}
+
+// http://api.oscar.aol.com/aim/startSession
+- (void)startSession
+{
+  NSString *supportedEvents;
+  NSMutableString *assertCaps = NULL;
+  BOOL haveCapabilities = NO;
+  if (_capabilityUUIDs && [_capabilityUUIDs count])
+  {
+    // ++++ perhaps we could validate _capabilityUUIDs here
+    supportedEvents = @"myInfo,presence,buddylist,im,offlineIM,dataIM";
+    assertCaps = [NSMutableString stringWithString:@"&assertCaps="];
+    NSString* caps =[[_capabilityUUIDs allObjects] componentsJoinedByString:@","];
+    [assertCaps appendString:caps];
+    haveCapabilities = YES;
+  }
+
+  if (!haveCapabilities)
+  {
+    supportedEvents = @"myInfo,presence,buddylist,im,offlineIM";
+    assertCaps = @"";
+  }
+
+//NSString *supportedEvents = @"myInfo,presence,buddylist,typing,im,offlineIM";
+//NSString *supportedEvents = @"myInfo,presence,buddylist,typing,im,dataIM,offlineIM";
+  
+  int clientTime = lrint([[NSDate date] timeIntervalSince1970] + _clockSkew);
+  
+  // Set up params in alphabetical order
+  NSMutableString *queryString;
+  queryString = [NSMutableString stringWithFormat:@"a=%@%@&clientName=%@&clientVersion=%@&events=%@&f=json&k=%@&sessionTimeout=%d&ts=%d",
+                     _authToken, assertCaps, [_clientName urlencode], [_clientVersion urlencode], [supportedEvents urlencode],
+                     _devID, kSessionTimeout, clientTime];
+  
+  NSString *encodedB64 = [self sha256:queryString withPath:@"aim/startSession"];
   
   MLog(@"StartSessionQuery: %@", queryString);
-  NSString *urlString = [NSString stringWithFormat:@"%@aim/startSession?%@&sig_sha256=%@", kAPIBaseURL, queryString,encodedB64];
+  NSString *urlString = [NSString stringWithFormat:kUrlStartSession, kAPIBaseURL, queryString,encodedB64];
   
   //will trigger onWimEventSessionStarted
   WimRequest *wimRequest = [WimRequest wimRequest];
@@ -752,35 +1143,47 @@ NSDictionary *WimSession_OnlineStateStrings;
 
 - (void)fetchEvents
 {
-  if (_pendingEndSession==YES)
+  if (_wimFetchRequest)
   {
+    MLog(@"[WimSession fetchEvents] already in fetch loop");
+    return;
+  }
+
+  if (_fetchUrl == nil)
+  {
+    MLog(@"[WimSession fetchEvents] missing fetchUrl");
+    [self resetSession];
+    [self setConnectionState:ConnectionState_Authenticating];
     return;
   }
   
-  NSString* urlString = [NSString stringWithFormat: kUrlFetchRequest, _fetchBaseUrl, [WimRequest nextRequestId], kUrlFetchTimeout];
-  NSURL *url = [NSURL URLWithString:urlString];
-  MLog (@"fetching %@", urlString);
+  NSURL *url = [NSURL URLWithString:_fetchUrl]; // host will timeout at kUrlFetchTimeout milliseconds (3 minutes currently)
+  MLog (@"fetching %@", _fetchUrl);
   
   [_wimFetchRequest release];
-  _wimFetchRequest = [[WimRequest wimRequest] retain];
- 
+  _wimFetchRequest = [[WimRequest wimRequest] retain]; 
+  [_wimFetchRequest setTimeout:kHttpFetchTimeout];// NSURLConnection will timeout after 3minutes 10seconds
   [_wimFetchRequest setDelegate:self];
   [_wimFetchRequest setAction:@selector(onWimEventFetchEvents:withError:)];
   [_wimFetchRequest setUserData:self];
   [_wimFetchRequest requestURL:url];
+  
+  [self performSelector:@selector(checkForConnection:) withObject:_wimFetchRequest afterDelay:3.0];
+  
+  //watch for http timeout to not fire
+  [self performSelector:@selector(watchDog:) withObject:_wimFetchRequest afterDelay:kHttpFetchTimeout+1];
 }
-
 
 - (void)endSession
 {
   _pendingEndSession = YES;
   NSString *urlString = [NSString stringWithFormat:kUrlEndSession, kAPIBaseURL, _sessionId]; 
   MLog (@"endSession %@", urlString);
-
+  
   [_wimFetchRequest setDelegate:nil];
   [_wimFetchRequest release];
   _wimFetchRequest = nil;
-
+  
   
   WimRequest *wimRequest = [WimRequest wimRequest];
   [wimRequest setDelegate:self];
@@ -788,19 +1191,63 @@ NSDictionary *WimSession_OnlineStateStrings;
   [wimRequest setUserData:self];
   [wimRequest setSynchronous:YES];
   [wimRequest requestURL:[NSURL URLWithString:urlString]];
-
-  _connected = NO;
-  _pendingEndSession = NO;
-  [[NSNotificationCenter defaultCenter] postNotificationName:kWimClientSessionOffline object:self];
+  
+  [self setConnectionState:ConnectionState_Offline];
 }
+
+#pragma mark WatchDog Methods
+
+- (void)checkForConnection:(id)fetchRequest
+{
+  if (_wimFetchRequest == fetchRequest)
+    [self setConnectionState:ConnectionState_Connected];
+}
+
+- (void)watchDog:(id)fetchRequest
+{
+  if (_wimFetchRequest == fetchRequest)
+  {
+    // _wimFetchRequest hasn't completed yet, assume that the connection will never resume
+    [_wimFetchRequest cancelRequest];
+    NSError *error = [NSError errorWithDomain:@"WimFetchEvent" code:408 userInfo:nil];
+    [self onWimEventFetchEvents:_wimFetchRequest withError:error];
+  }
+}
+
+
+- (void)checkForAuthenticationError:(NSInteger)statusCode
+{
+  if (statusCode == 401 || statusCode == 462)
+  {
+    [self resetSession];
+    [self setConnectionState:ConnectionState_Authenticating];
+  }
+}
+
+
+
+
 
 #pragma mark Event handlers for Web API response
 
 - (void)onWimEventStartSession:(WimRequest *)wimRequest withError:(NSError *)error
-{
+{  
   if (error)
   {
-    MLog(@"EventSessionStarted failed with error: %@", [error description]);
+    _sessionAttempt++;
+
+    MLog(@"EventSessionStarted(%d) failed with error: %@", _sessionAttempt, [error description]);
+
+    if (_sessionAttempt < 4)
+    {
+      [self startSession];
+    }
+    else
+    {
+      _sessionAttempt = 0;
+      [self setConnectionState:ConnectionState_Offline];
+    }
+
     return;
   }
   
@@ -816,74 +1263,131 @@ NSDictionary *WimSession_OnlineStateStrings;
     MLog(@"exception %@", e);
   }
   
-  NSString* statusCode = [dictionary stringValueForKeyPath:@"response.statusCode"];
+  int statusCode = [[dictionary valueForKeyPath:@"response.statusCode"] intValue];
   
-  if (!dictionary || [statusCode isEqualToString:@"200"]==NO)
-  {
-    if ([statusCode isEqualToString:@"607"]==YES)
+    switch (statusCode)
     {
-      _sessionAttempt = 0;
-      MLog(@"account has been rate limited");
-      return;
+      case 200:
+      {
+        _sessionAttempt = 0;
+        
+        [_sessionId release];
+        _sessionId = [[dictionary stringValueForKeyPath:@"response.data.aimsid"] retain];
+
+        NSString *fetchBaseURL = [dictionary stringValueForKeyPath:@"response.data.fetchBaseURL"];
+        
+        [_fetchUrl release];
+        
+        if (fetchBaseURL)
+        {
+          _fetchUrl = [[NSString stringWithFormat: kUrlFetchRequest, fetchBaseURL, [self nextRequestId] , kUrlFetchTimeout] retain];
+        }
+        else
+        {
+          _fetchUrl = nil;
+        }
+        
+        NSMutableDictionary *myInfo = [[[NSMutableDictionary alloc] initWithDictionary:[dictionary valueForKeyPath:@"response.data.myInfo"]] autorelease];
+        [_delegate wimSession:self receivedMyInfoEvent:myInfo];
+        
+        [_myInfo release];
+        _myInfo = [myInfo retain];
+
+        NSString* msg = [NSString decodeHTMLEntities:[myInfo statusMsg]];
+        if (msg)
+        {
+          [_statusMessage release];
+          _statusMessage = [msg retain];
+        }
+        msg = [NSString decodeHTMLEntities:[myInfo awayMsg]];
+        if (msg)
+        {
+          _awayMessage = [msg copy]; //awayMsg contains xhtml
+
+          [_awayMessage release];
+          _awayMessage = [msg retain];
+        }
+        
+        if ([dictionary valueForKeyPath:@"response.data.myInfo.aimId"])
+        {
+          // TODO:should this set?  or just ASSERT to be TRUE?
+          [self setUserName:[dictionary valueForKeyPath:@"response.data.myInfo.aimId"]];
+        }
+        
+        //[[NSNotificationCenter defaultCenter] postNotificationName:kWimClientSessionOnline object:self];
+        //[[NSNotificationCenter defaultCenter] postNotificationName:kWimClientSessionEndConnectAttempt object:self];
+        if (_fetchUrl)
+        {
+          [self setConnectionState:ConnectionState_Connected];
+          [self fetchEvents];
+        }
+        else
+        {
+          [self resetSession];
+          [self setConnectionState:ConnectionState_Authenticating];
+        }
+        break;
+      }
+      case 607:
+      {
+        MLog(@"account has been rate limited");
+
+        if ([_delegate respondsToSelector:@selector(wimSessionRateLimited:)])
+          [_delegate performSelector:@selector(wimSessionRateLimited:) withObject:self];
+        
+        [self setConnectionState:ConnectionState_Offline];
+        return;
+      }
+        
+      case 408:
+      {
+        MLog(@"timeout of backend servers");
+
+        if ([_delegate respondsToSelector:@selector(wimSessionServerError:)])
+          [_delegate performSelector:@selector(wimSessionServerError:) withObject:self];
+
+        [self setConnectionState:ConnectionState_Offline];
+        return;
+      }
+        
+      case 400:
+      case 401:
+      case 440:
+      case 462:
+      {
+        [_tokenExpiration release];
+        _tokenExpiration = nil;
+        [self setConnectionState:ConnectionState_Authenticating];
+        return;
+      }
+        
+        
+      default:
+      {
+        MLog(@"retrying session start");
+        [self setConnectionState:ConnectionState_Connecting];
+        return;
+      }
     }
-    
-    _sessionAttempt++;
-    
-    if (_sessionAttempt < 4)
-    {
-      MLog(@"retrying session start");
-      [self startSession];
-    }
-    
-    return;
-  }
-  
-  _sessionAttempt = 0;
-  [_sessionId release];
-  _sessionId = [[dictionary stringValueForKeyPath:@"response.data.aimsid"] retain];
-  [_fetchBaseUrl release];
-  _fetchBaseUrl = [[dictionary stringValueForKeyPath:@"response.data.fetchBaseURL"] retain];
-  
-  NSMutableDictionary *myInfo = [[[NSMutableDictionary alloc] initWithDictionary:[dictionary valueForKeyPath:@"response.data.myInfo"]] autorelease];
-  [[NSNotificationCenter defaultCenter]  postNotificationName:kWimSessionMyInfoEvent object:self userInfo:myInfo]; 
-  
-  [_myInfo release];
-  _myInfo = [myInfo retain];
-  
-  if ([dictionary valueForKeyPath:@"response.data.myInfo.aimId"])
-  {
-    // TODO:should this set?  or just ASSERT to be TRUE?
-    [self setUserName:[dictionary valueForKeyPath:@"response.data.myInfo.aimId"]];
-  }
- 
-#if 1 // do we not get our own statusMsg?
-  if ([dictionary valueForKeyPath:@"response.data.myInfo.statusMsg"] == nil)
-  {
-    // dispatch a presence update event
-    NSString *aimId = [dictionary valueForKeyPath:@"response.data.myInfo.aimId"];
-    if (aimId)
-      [self requestPresenceForAimId:aimId];
-  }
-#endif
-  
-  _connected = YES;
-  [[NSNotificationCenter defaultCenter] postNotificationName:kWimClientSessionOnline object:self];
-  
-  [self fetchEvents];
 }        
 
 
 - (void)onWimEventFetchEvents:(WimRequest *)wimRequest withError:(NSError *)error
 {
+  [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(watchDog:) object:_wimFetchRequest];
+
   [_wimFetchRequest release];
   _wimFetchRequest = nil;
   
   if (error)
   {
     MLog(@"onWimEventFetchEvents failed with error: %@", [error description]);
-    // TODO: send offline event
+    [self setConnectionState:ConnectionState_Reconnecting];
+    
     return;
   }
+  
+  
   NSString* jsonResponse = [[[NSString alloc] initWithData:[wimRequest data] encoding:NSUTF8StringEncoding] autorelease];
   MLog (jsonResponse);
   
@@ -896,36 +1400,58 @@ NSDictionary *WimSession_OnlineStateStrings;
     MLog (@"Exception %@", e);
   }
   
-  if (aDictionary)
+  MLog( @"onWimEventFetchEvents - %@", aDictionary );
+  
+  int statusCode = [[aDictionary valueForKeyPath:@"response.statusCode"] intValue];
+  
+  if (statusCode == 200)
   {
-    NSString* statusCode = [aDictionary stringValueForKeyPath:@"response.statusCode"];
-    if ([statusCode isEqualToString:@"200"])
+    // notify that we're in the good fetchloop
+    [self setConnectionState:ConnectionState_Connected];
+    
+    NSTimeInterval nextFetch = [[aDictionary valueForKeyPath:@"response.data.timeToNextFetch"] intValue];
+
+    NSString *fetchBaseURL = [aDictionary stringValueForKeyPath:@"response.data.fetchBaseURL"];
+    [_fetchUrl release];
+    
+    if (fetchBaseURL)
     {
-      NSTimeInterval nextFetch = [[aDictionary stringValueForKeyPath:@"response.data.timeToNextFetch"] intValue];
-      [_fetchBaseUrl release];
-      _fetchBaseUrl = [[aDictionary stringValueForKeyPath:@"response.data.fetchBaseURL"] retain];
+      _fetchUrl = [[NSString stringWithFormat: kUrlFetchRequest, fetchBaseURL, [self nextRequestId] , kUrlFetchTimeout] retain];
+    }
+    else
+    {
+      _fetchUrl = nil;
+    }
+        
+    NSArray* events = [aDictionary valueForKeyPath:@"response.data.events"];
+    [self parseEvents:events];
+    
+    if (_pendingEndSession==NO)
+    {
+      // change this to delay - timeIntervals as in seconds -- timeToNextFetch is in milliseconds
+      nextFetch = nextFetch / 1000;
       
-      NSArray* events = [aDictionary valueForKeyPath:@"response.data.events"];
-      [self parseEvents:events];
-      
-      if (_pendingEndSession==NO)
+      if (nextFetch == 0 )
       {
-        // change this to delay - timeIntervals as in seconds -- timeToNextFetch is in milliseconds
-        nextFetch = nextFetch / 1000;
-        
-        if (nextFetch == 0 )
-        {
-          // wait at least a second
-          nextFetch = 1;
-        }
-        
-        [self performSelector:@selector(fetchEvents) withObject:self afterDelay:nextFetch];
+        // wait at least a second
+        nextFetch = 1;
       }
+      
+      [self performSelector:@selector(fetchEvents) withObject:self afterDelay:nextFetch];
     }
   }
   else
   {
-    MLog(@"received unexpected fetchfailure code");
+    MLog(@"received error error from fetch (%d)", statusCode);
+    
+    if (statusCode == 401)
+    {
+      [_tokenExpiration release];
+      _tokenExpiration = nil;
+    }
+    
+    [self resetSession];
+    [self setConnectionState:ConnectionState_Authenticating]; 
   }
 }
 
@@ -934,12 +1460,10 @@ NSDictionary *WimSession_OnlineStateStrings;
   if (error)
   {
     MLog(@"onWimEventEndSession failed with error: %@", [error description]);
-    // continue reseting application state
   }
 
-  _connected = NO;
-  _pendingEndSession = NO;
-  [[NSNotificationCenter defaultCenter] postNotificationName:kWimClientSessionOffline object:self];
+  [self resetSession];
+  [self setConnectionState:ConnectionState_Offline];
 }
 
 
@@ -971,22 +1495,41 @@ NSDictionary *WimSession_OnlineStateStrings;
       NSMutableDictionary *buddy;
       while (buddy = [buddies nextObject])
       {
-        // fire presence events for existing UI - allowing prexisting UI to update state
-        [[NSNotificationCenter defaultCenter]  postNotificationName:kWimSessionPresenceEvent object:self userInfo:buddy];
+        [_delegate wimSession:self receivedPresenceEvent:buddy];
       }
     }
+      }
+    }
+
+- (void)onWimEventProposalReplySentResponse:(WimRequest *)wimRequest withError:(NSError *)error
+{
+  if (error)
+  {
+    MLog(@"onWimEventProposalReplySentResponse failed with error: %@", [error description]);
+  }
+  else
+  {
+    NSString* jsonString = [[[NSString alloc] initWithData:[wimRequest data] encoding:NSUTF8StringEncoding] autorelease];
+    MLog(@"onWimEventProposalReplySentResponse received indicating success:");
+    MLog (jsonString);
   }
 }
 
 - (void)onWimEventIMSentResponse:(WimRequest *)wimRequest withError:(NSError *)error
 {
+  NSString* jsonString = nil;
+  
   if (error)
   {
+    // synthesize an error 400 from the server
+    jsonString = @"{\"response\":{\"statusCode\":400, \"statusText\":\"Session does not exist\", \"requestId\":\"\", \"data\":{}}}";
     MLog(@"onWimEventIMSentResponse failed with error: %@", [error description]);
-    return;
+  }
+  else
+  {
+    jsonString = [[[NSString alloc] initWithData:[wimRequest data] encoding:NSUTF8StringEncoding] autorelease];
   }
     
-  NSString* jsonString = [[[NSString alloc] initWithData:[wimRequest data] encoding:NSUTF8StringEncoding] autorelease];
   MLog (jsonString);
   
   
@@ -1000,13 +1543,15 @@ NSDictionary *WimSession_OnlineStateStrings;
   }
 
   if (jsonDictionary) {
-    NSNumber *statusCode = [jsonDictionary valueForKeyPath:@"response.statusCode"];
     
+    NSInteger statusCode = [[jsonDictionary valueForKeyPath:@"response.statusCode"] intValue];
+    [self checkForAuthenticationError:statusCode];
     
-    if ([statusCode isEqual:[NSNumber numberWithInt:200]])
-    {
-      [[NSNotificationCenter defaultCenter] postNotificationName:kWimClientIMSent object:self userInfo:jsonDictionary];
-    }
+    NSDictionary *dictionary = [NSDictionary dictionaryWithObjectsAndKeys:[wimRequest userData], @"sendIMData",
+                                jsonDictionary, @"serverResponse",
+                                nil];
+
+    [[NSNotificationCenter defaultCenter] postNotificationName:kWimClientIMSent object:self userInfo:dictionary];
   }
 }
 
@@ -1038,7 +1583,16 @@ NSDictionary *WimSession_OnlineStateStrings;
       [_myInfo release];
       _myInfo = [buddy retain];
 
-      [[NSNotificationCenter defaultCenter]  postNotificationName:kWimSessionMyInfoEvent object:self userInfo:buddy];
+      if ([[[[wimRequest urlRequest] URL] query] rangeOfString:@"view=online"].location != NSNotFound)
+      {
+        [_myInfo setValue:@"online" forKey:@"state"];
+      }
+      else if ([[[[wimRequest urlRequest] URL] query] rangeOfString:@"view=away"].location != NSNotFound)
+      {
+        [_myInfo setValue:@"away" forKey:@"state"];
+      }
+      
+      [_delegate wimSession:self receivedMyInfoEvent:_myInfo];
     }
   }
   
@@ -1123,13 +1677,8 @@ NSDictionary *WimSession_OnlineStateStrings;
       
       if ([statusCode intValue] == 200)
       {
-        // if success - then set the friendlyname if specified
-        
-        NSArray *userData = [wimRequest userData];
-        if ([userData count] == 2)
-        {
-          [self setFriendlyName:[userData objectAtIndex:1] toAimId:[userData objectAtIndex:0]];
-        }
+        NSInvocation *invocation = [[wimRequest userData] objectForKey:@"delayedInvocation"];
+        [invocation invoke];
       }
     }
   }
@@ -1144,10 +1693,60 @@ NSDictionary *WimSession_OnlineStateStrings;
     return;
   }
 
-  //NSString* jsonResponse = [[[NSString alloc] initWithData:[wimRequest data] encoding:NSUTF8StringEncoding] autorelease];
-  //NSDictionary* dictionary = [jsonResponse JSONValue];//[NSDictionary dictionaryWithJSONString:jsonResponse];
-  //NSNumber *statusCode = [dictionary valueForKeyPath:@"response.statusCode"];
+  NSString* jsonResponse = [[[NSString alloc] initWithData:[wimRequest data] encoding:NSUTF8StringEncoding] autorelease];
+  NSDictionary* dictionary = nil;
+  
+  @try {
+    dictionary = [jsonResponse JSONValue];
+  }
+  @catch (NSException *e) {
+    MLog (@"exception %S", e);
+  }
+  
+  NSNumber *statusCode = [dictionary valueForKeyPath:@"response.statusCode"];
+  if (200 == [statusCode intValue])
+  {
+    
+    MLog(@"SetLargeBuddyIcon response %@", jsonResponse);
+
+    NSString *iconId = [dictionary valueForKeyPath:@"response.data.id"];
+    if (iconId)
+    {
+      NSString *subIconId = [iconId substringFromIndex:4];
+      MLog(@"new asset %@", subIconId);
+      [self setExpresssion:subIconId];
+    }
+  }
 }  
+
+- (void)onWimEventSetExpressionResponse:(WimRequest *)wimRequest withError:(NSError *)error
+{
+  if (error)
+  {
+    MLog(@"onWimEventSetExpressionResponse failed with error: %@", [error description]);
+    return;
+  }
+  
+  NSString* jsonResponse = [[[NSString alloc] initWithData:[wimRequest data] encoding:NSUTF8StringEncoding] autorelease];
+  NSDictionary* dictionary = nil;
+  
+  @try {
+    dictionary = [jsonResponse JSONValue];
+  }
+  @catch (NSException *e) {
+    MLog (@"exception %S", e);
+  }
+  
+  MLog(@"setExpression response %@", jsonResponse);
+  
+  NSNumber *statusCode = [dictionary valueForKeyPath:@"response.statusCode"];
+  if (200 == [statusCode intValue])
+  {
+    [self requestPresenceForAimId:[self aimId]];
+    MLog(@"iconset");
+  }
+  
+}
 
 - (void)onWimEventMoveGroupResponse:(WimRequest *)wimRequest withError:(NSError *)error
 {
@@ -1161,6 +1760,20 @@ NSDictionary *WimSession_OnlineStateStrings;
   //NSDictionary* dictionary = [jsonResponse JSONValue];//[NSDictionary dictionaryWithJSONString:jsonResponse];
   //NSNumber *statusCode = [dictionary valueForKeyPath:@"response.statusCode"];
 }  
+
+- (void)onWimEventRemoveGroupResponse:(WimRequest *)wimRequest withError:(NSError *)error
+{
+  if (error)
+  {
+    MLog(@"onWimEventRemoveGroupResponse failed with error: %@", [error description]);
+    return;
+  }
+  
+  //NSString* jsonResponse = [[[NSString alloc] initWithData:[wimRequest data] encoding:NSUTF8StringEncoding] autorelease];
+  //NSDictionary* dictionary = [jsonResponse JSONValue];//[NSDictionary dictionaryWithJSONString:jsonResponse];
+  //NSNumber *statusCode = [dictionary valueForKeyPath:@"response.statusCode"];
+}  
+
 
 - (void)onWimEventGetHostBuddyInfoResponse:(WimRequest *)wimRequest withError:(NSError *)error
 {
@@ -1183,14 +1796,14 @@ NSDictionary *WimSession_OnlineStateStrings;
                                 htmlResponse ? htmlResponse : @"", WimSessionBuddyInfoHtmlKey,
                                 nil];
                                 
-    [[NSNotificationCenter defaultCenter] postNotificationName:kWimSessionHostBuddyInfoEvent object:self userInfo:dictionary];
+    [_delegate wimSession:self receivedHostBuddyInfoEvent:dictionary];
   }
 }  
 
 
 #pragma mark Class Accessors
 
-- (void)setDelegate:(id<WimSessionSecondaryChallengeDelegate>)aDelegate
+- (void)setDelegate:(id)aDelegate
 {
   _delegate = aDelegate; // weak
 }
@@ -1211,7 +1824,6 @@ NSDictionary *WimSession_OnlineStateStrings;
   username = [username copy];
   [_userName autorelease];
   _userName = username;
-  [[NSNotificationCenter defaultCenter]  postNotificationName:@"prenotifiy.buddy" object:self userInfo:[self myInfo]];
 }
 
 - (NSString *)userName
@@ -1236,15 +1848,45 @@ NSDictionary *WimSession_OnlineStateStrings;
   return _buddyList;
 }
 
-
 - (void)setBuddyList:(NSDictionary *)buddyList
 {
   NSMutableDictionary* mutableList = [buddyList mutableCopy];
-  [_buddyList autorelease];
+  [_buddyList release];
   _buddyList = mutableList;
   [self buddyListArrived];
 }
 
+
+- (NSArray *)groupsForBuddy:(NSDictionary *)buddy
+{
+  NSMutableArray *result = [NSMutableArray array];
+  
+  NSArray *buddyList = [_buddyList valueForKey:@"groups"];
+  
+  NSEnumerator* buddyListGroups = [buddyList objectEnumerator];
+  NSArray* buddyGroup;
+  while ((buddyGroup = [buddyListGroups nextObject])) 
+  {
+    NSEnumerator *buddies = [[buddyGroup valueForKey:@"buddies"] objectEnumerator];
+    NSMutableDictionary *testBuddy;
+    while (testBuddy = [buddies nextObject])
+    {
+      if ( [testBuddy isEqualToBuddy:buddy] ) 
+      {
+        [result addObject:buddyGroup];
+        // a buddy should only be in an individual buddygroup once
+        break;
+      }
+    }
+  }
+  return result;
+}
+
+
+- (NSArray *)groups
+{
+  return [_buddyList valueForKey:@"groups"];
+}
 
 - (NSString*)aimId
 {
@@ -1260,13 +1902,26 @@ NSDictionary *WimSession_OnlineStateStrings;
     [fakeMyInfo setObject:[self userName] forKey:@"aimId"];
     [fakeMyInfo setObject:[self userName] forKey:@"displayId"];
     
-    [[NSNotificationCenter defaultCenter]  postNotificationName:@"prenotifiy.buddy" object:self userInfo:fakeMyInfo];
-    
     _myInfo = fakeMyInfo;
   }
   return _myInfo;
 } 
 
-
-
 @end
+
+
+@implementation NSString (WimURLEncoding) 
+
+- (NSString *)stringByAddingPercentEscapes 
+{ 
+  return [(NSString *)CFURLCreateStringByAddingPercentEscapes(NULL, 
+                                                    (CFStringRef)self, NULL, NULL, 
+                                                    CFStringConvertNSStringEncodingToEncoding(NSUTF8StringEncoding)) autorelease]; 
+} 
+
+- (NSString *)stringByReplacingPercentEscapes 
+{ 
+  return [(NSString *)CFURLCreateStringByReplacingPercentEscapes(kCFAllocatorDefault,(CFStringRef)self, CFSTR("")) autorelease]; 
+} 
+
+@end 

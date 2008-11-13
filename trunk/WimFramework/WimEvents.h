@@ -32,8 +32,8 @@ extern  NSString *kWimSessionSessionEndedEvent; // Event Type = offlineIM
 
 // Client Events
 extern NSString *kWimClientIMSent;          // client notifications
-extern NSString *kWimClientSessionOnline;
-extern NSString *kWimClientSessionOffline;
+extern NSString *kWimClientConnectionStateChange; // notification that the state of the connection changed
+
 
 // WimRequest notifications are broadcast before calling a Web API, and after the Web API has returned data
 extern NSString *kWimRequestDidStart;    

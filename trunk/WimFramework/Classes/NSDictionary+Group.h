@@ -17,55 +17,20 @@
  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#import "WimPlatform.h"
-#import "WimAdditions.h"
-#import "WimConstants.h"
 
-@interface WimRequest : NSObject {
-  id delegate;
-  SEL action;
-  NSMutableData* data;
-  NSURLConnection*  urlConnection;
-  NSURLRequestCachePolicy cachePolicy;
-  NSMutableURLRequest *urlRequest;
-	NSURL *requestURL;
-  NSData *postData;
-  id userData;
-  BOOL synchronous;
-  float timeout;
-  int connectionStatus;
-}
+#if TARGET_OS_IPHONE
+#import <UIKit/UIKit.h>
+#else
+#import <Cocoa/Cocoa.h>
+#endif
 
-+ (WimRequest *)wimRequest;
+@interface NSDictionary (WIMGroup)
 
-- (id)delegate;
-- (void)setDelegate:(id)delegate;
+- (NSArray*)buddies;
+- (NSString*)name;
+- (BOOL)writeable;
 
-- (void)setAction:(SEL)aSelector;
-- (SEL)action;
-
-- (void)setUserData:(id)userData;
-- (id)userData;
-- (NSData *)data;
-- (int)connectionStatus;
-
-- (void)setSynchronous:(BOOL)useOnlyForEndSession;
-
-- (void)requestURL:(NSURL *)url;
-- (void)requestURL:(NSURL *)url withData:(NSData *)data;
-
-- (void)cancelRequest;
-
-- (NSURLRequest *)urlRequest;
-
-- (void)setTimeout:(float)timeout;
-
-- (void)setCachePolicy:(NSURLRequestCachePolicy)cachePolicy;
-- (NSURLRequestCachePolicy)cachePolicy;
-
-@end
-
-
-@interface NSObject (KeyPathExtensions)
-- (NSString*) stringValueForKeyPath:(NSString*)keyPath;
+#if 0
+- (BOOL)localGroup;
+#endif
 @end
