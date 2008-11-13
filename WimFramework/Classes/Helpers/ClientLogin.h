@@ -29,6 +29,7 @@
   NSString * _password;
   NSString * _sessionKey;
   id _delegate;
+  NSTimeInterval _clientTime;
 }
 
 - (void)setDelegate:(id)aDelegate;
@@ -38,6 +39,7 @@
 - (NSString *) tokenStr;
 - (NSString *) sessionKey;
 - (NSString *) expiresIn;
+- (NSTimeInterval) clockSkew;
 @end
 
 @interface NSObject (ClientLoginDelegate)

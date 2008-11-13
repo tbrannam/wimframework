@@ -18,54 +18,29 @@
  */
 
 #import "WimPlatform.h"
-#import "WimAdditions.h"
-#import "WimConstants.h"
 
-@interface WimRequest : NSObject {
-  id delegate;
-  SEL action;
-  NSMutableData* data;
-  NSURLConnection*  urlConnection;
-  NSURLRequestCachePolicy cachePolicy;
-  NSMutableURLRequest *urlRequest;
-	NSURL *requestURL;
-  NSData *postData;
-  id userData;
-  BOOL synchronous;
-  float timeout;
-  int connectionStatus;
-}
+@interface NSDictionary (WIMBuddy)
 
-+ (WimRequest *)wimRequest;
+-(NSString *)aimId;
+-(NSString *)displayName;
+-(NSString *)buddyIcon;
+-(NSString *)state;
+-(NSString *)group;
+-(NSString *)statusMsg;
+-(NSString *)awayMsg;
+-(NSData *)buddyIconData;
 
-- (id)delegate;
-- (void)setDelegate:(id)delegate;
+-(BOOL)isAway;
+-(BOOL)isOnline;
+-(BOOL)isAvailable; // not offline or unknown
+-(BOOL)isMobile;
 
-- (void)setAction:(SEL)aSelector;
-- (SEL)action;
-
-- (void)setUserData:(id)userData;
-- (id)userData;
-- (NSData *)data;
-- (int)connectionStatus;
-
-- (void)setSynchronous:(BOOL)useOnlyForEndSession;
-
-- (void)requestURL:(NSURL *)url;
-- (void)requestURL:(NSURL *)url withData:(NSData *)data;
-
-- (void)cancelRequest;
-
-- (NSURLRequest *)urlRequest;
-
-- (void)setTimeout:(float)timeout;
-
-- (void)setCachePolicy:(NSURLRequestCachePolicy)cachePolicy;
-- (NSURLRequestCachePolicy)cachePolicy;
+-(BOOL)isEqualToBuddy:(NSDictionary *)buddy;
 
 @end
 
-
-@interface NSObject (KeyPathExtensions)
-- (NSString*) stringValueForKeyPath:(NSString*)keyPath;
+@interface NSMutableDictionary (WIMBuddy)
+-(void)updateBuddy:(NSDictionary *)buddyInfo;
+-(void)setBuddyIcon:(NSString*)aBuddyIcon;
+-(void)setBuddyIconData:(NSData*)aBuddyIconData;
 @end

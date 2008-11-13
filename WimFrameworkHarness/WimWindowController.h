@@ -24,7 +24,7 @@
 
 @class WimSession;
 
-@interface WimWindowController : NSWindowController <WimSessionSecondaryChallengeDelegate>
+@interface WimWindowController : NSWindowController <WimSessionDelegate>
 {
   // a key is required to access the WIM Web API's --- get your key at http://developer.aim.com
   IBOutlet NSTextField *aimDeveloperKey;

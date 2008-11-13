@@ -1,5 +1,7 @@
+#import "MLog.h"
+
 //MLog.m
-BOOL __MLogOn=NO;
+static BOOL __MLogOn=NO;
 
 @implementation MStringLog
 +(void)initialize
@@ -25,8 +27,9 @@ BOOL __MLogOn=NO;
 	print=[[NSString alloc] initWithFormat:format arguments:ap];
 	va_end(ap);
   //MLog handles synchronization issues
-	NSLog(@"%s:%d %@",[[file lastPathComponent] UTF8String],
-              lineNumber,print);
+  NSString *log = [NSString stringWithFormat:@"%s:%d %@",[[file lastPathComponent] UTF8String],
+                   lineNumber,print];
+	NSLog(log);
 	[print release];
 	[file release];
 	

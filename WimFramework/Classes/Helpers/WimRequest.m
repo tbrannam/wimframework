@@ -19,17 +19,11 @@
 
 
 #import "WimRequest.h"
-#import "MLog.h"
 #import "WimEvents.h"
+#import "MLog.h"
 
-static int WimRequestId = 0;
 
 @implementation WimRequest
-
-+ (int)nextRequestId
-{
-  return WimRequestId++;
-}
 
 + (WimRequest *)wimRequest
 {
@@ -37,8 +31,19 @@ static int WimRequestId = 0;
 }
 
 
+- (id)init
+{
+  if (self = [super init])
+  {
+    timeout = 30.f;// timeout after 30 seconds by default
+    cachePolicy = NSURLRequestReloadIgnoringCacheData;
+  }
+  return self;
+}
+
 - (void)dealloc
 {
+  [urlRequest release];
   [data release];
   [urlConnection release];
   [postData release];
@@ -90,6 +95,17 @@ static int WimRequestId = 0;
   synchronous = useOnlyForEndSession;
 }
 
+- (void)setCachePolicy:(NSURLRequestCachePolicy)aCachePolicy
+{
+  cachePolicy = aCachePolicy;
+}
+
+- (NSURLRequestCachePolicy)cachePolicy
+{
+  return cachePolicy;
+}
+
+
 - (void)requestURL:(NSURL*)url 
 {
   [self requestURL:url withData:nil];
@@ -107,9 +123,12 @@ static int WimRequestId = 0;
 	requestURL = [url retain];
   
   // lets load the url asynchronously here!
-  NSMutableURLRequest*   urlRequest = [NSMutableURLRequest requestWithURL: url
-                                                              cachePolicy: NSURLRequestReloadIgnoringCacheData
-                                                          timeoutInterval: 30.0f];
+  [urlRequest release];
+  urlRequest = [[NSMutableURLRequest requestWithURL:url
+                                       cachePolicy:cachePolicy
+                                   timeoutInterval:timeout] retain];
+  MLog(@"[WimRequest requestURL] urlRequest = %@", urlRequest);
+
   if (postData)
   {
     [urlRequest setHTTPBody:postData];
@@ -125,8 +144,8 @@ static int WimRequestId = 0;
   
   if (synchronous == NO)
   {
-    urlConnection = [[NSURLConnection connectionWithRequest: urlRequest
-                                                           delegate: self] retain];  
+    urlConnection = [[NSURLConnection connectionWithRequest:urlRequest delegate:self] retain];
+    MLog(@"[WimRequest requestURL] urlConnection = %@", urlConnection);
     // Send a generic notification that a request is being started
     NSDictionary *infoDict = [NSDictionary dictionaryWithObject:requestURL forKey:@"URL"];
     [[NSNotificationCenter defaultCenter] postNotificationName:kWimRequestDidStart object:self userInfo:infoDict];
@@ -135,50 +154,79 @@ static int WimRequestId = 0;
   {
      NSURLResponse* response = [[[NSURLResponse alloc] init] autorelease];  
      NSError* error = [[[NSError alloc] init] autorelease];  
-     /*NSData* data = */[NSURLConnection sendSynchronousRequest:urlRequest returningResponse:&response error:&error];  
+     /*NSData* data = */[NSURLConnection sendSynchronousRequest:urlRequest   
+         returningResponse:&response   
+         error:&error];  
   }
 }
 
+- (void)cancelRequest
+{
+  [urlConnection cancel];
+}
+
+- (NSURLRequest *)urlRequest
+{
+  return urlRequest;
+}
+
+- (int)connectionStatus
+{
+  return connectionStatus;
+}
 
 #pragma mark NSURLConnection delegate
 
 - (void)connection:(NSURLConnection *)connection didReceiveResponse:(NSURLResponse *)response
 {
-  if ([response isKindOfClass:[NSHTTPURLResponse class]])
-    MLog(@"didReceiveResponse (%u)", [(NSHTTPURLResponse*)response statusCode]);
+  connectionStatus = 0;
 
+  if ([response isKindOfClass:[NSHTTPURLResponse class]])
+  {
+    MLog(@"didReceiveResponse %@, (%u)", [requestURL description], [(NSHTTPURLResponse*)response statusCode]);
+    connectionStatus = [(NSHTTPURLResponse*)response statusCode];
+  }
   
   if (urlConnection == connection)
   {
     [data setLength:0];
   }
   
+#if 0 
+  // this case is handled in -connection:willSendRequest:redirectResponse:
+
   // we might get a 302, which means we may need to re-direct to the new location ourselves!
-  NSString*   newlocationString = [[(NSHTTPURLResponse*)response allHeaderFields] objectForKey:@"Location"];
-  
-  if ([(NSHTTPURLResponse*)response statusCode] == 302 && newlocationString)
+  if ([response isKindOfClass:[NSHTTPURLResponse class]])
   {
-    [urlConnection cancel];
-    [urlConnection release];
-    urlConnection = nil;
-	  // Report that this transaction finished, as we will be starting a new one
-	  NSDictionary *closeDict = [NSDictionary dictionaryWithObject:requestURL forKey:@"URL"];
-	  [[NSNotificationCenter defaultCenter] postNotificationName:kWimRequestDidFinish object:self userInfo:closeDict];
-	  [requestURL release];
-    NSURL* url = [NSURL URLWithString: newlocationString];
-	  requestURL = [url retain];
-    
-    NSURLRequest* packageURLRequest = [NSURLRequest requestWithURL: url
-                                                    cachePolicy: NSURLRequestReloadIgnoringCacheData
-                                                    timeoutInterval: 30.0f];
-    
-    urlConnection = [[NSURLConnection connectionWithRequest: packageURLRequest
-                                                           delegate: self] retain];
-	  
-	  // Send a generic notification that a request is being started
-	  NSDictionary *startDict = [NSDictionary dictionaryWithObject:requestURL forKey:@"URL"];
-	  [[NSNotificationCenter defaultCenter] postNotificationName:kWimRequestDidStart object:self userInfo:startDict];
+  
+    if ([(NSHTTPURLResponse*)response statusCode] == 302)
+    {
+      NSString *newlocationString =  [[(NSHTTPURLResponse*)response allHeaderFields] objectForKey:@"Location"];
+
+      [urlConnection cancel];
+      [urlConnection release];
+      urlConnection = nil;
+      // Report that this transaction finished, as we will be starting a new one
+      NSDictionary *closeDict = [NSDictionary dictionaryWithObject:requestURL forKey:@"URL"];
+      [[NSNotificationCenter defaultCenter] postNotificationName:kWimRequestDidFinish object:self userInfo:closeDict];
+      [requestURL release];
+      NSURL* url = [NSURL URLWithString: newlocationString];
+      requestURL = [url retain];
+      
+      [urlRequest release];
+      urlRequest = [[NSURLRequest requestWithURL:url
+                                     cachePolicy:cachePolicy
+                                 timeoutInterval:timeout] retain];
+      
+      urlConnection = [[NSURLConnection connectionWithRequest:urlRequest
+                                                             delegate:self] retain];
+      
+      // Send a generic notification that a request is being started
+      NSDictionary *startDict = [NSDictionary dictionaryWithObject:requestURL forKey:@"URL"];
+      [[NSNotificationCenter defaultCenter] postNotificationName:kWimRequestDidStart object:self userInfo:startDict];
+    }
   }
+#endif
 }
 - (void)connection:(NSURLConnection *)connection didReceiveData:(NSData *)aData
 {  
@@ -198,7 +246,7 @@ static int WimRequestId = 0;
   {
     MLog ([connection description]);
 
-    if (delegate)
+    if (delegate && [delegate respondsToSelector: action])
       [delegate performSelector:action withObject:self withObject:nil];
   }
 	
@@ -217,8 +265,8 @@ static int WimRequestId = 0;
   {
     [data setLength:0];
 
-    if (delegate)
-      [delegate performSelector:action withObject:self withObject:nil];
+    if (delegate && [delegate respondsToSelector: action])
+      [delegate performSelector:action withObject:self withObject:connectionError];
   }
 	
 	// Send a generic notification that a request is finished
@@ -226,6 +274,48 @@ static int WimRequestId = 0;
 	[[NSNotificationCenter defaultCenter] postNotificationName:kWimRequestDidFinish object:self userInfo:infoDict];
 	[requestURL release];
   [self autorelease];
+}
+
+
+- (NSURLRequest *)connection:(NSURLConnection *)connection willSendRequest:(NSURLRequest *)request redirectResponse:(NSURLResponse *)response
+{
+  
+  if ([(NSHTTPURLResponse*)response statusCode] == 302)
+  {
+    // Report that this transaction finished, as we will be starting a new one
+    NSDictionary *closeDict = [NSDictionary dictionaryWithObject:requestURL forKey:@"URL"];
+    [[NSNotificationCenter defaultCenter] postNotificationName:kWimRequestDidFinish object:self userInfo:closeDict];
+    [requestURL release];
+    
+    requestURL = [[request URL] copy];
+    
+    [urlRequest release];
+    urlRequest = [[NSURLRequest requestWithURL:requestURL
+                                   cachePolicy:cachePolicy
+                               timeoutInterval:timeout] retain];
+    
+    // Send a generic notification that a request is being started
+	  NSDictionary *startDict = [NSDictionary dictionaryWithObject:requestURL forKey:@"URL"];
+	  [[NSNotificationCenter defaultCenter] postNotificationName:kWimRequestDidStart object:self userInfo:startDict];
+    
+    return urlRequest;
+  }
+
+  return request;
+}
+
+
+- (NSCachedURLResponse *)connection:(NSURLConnection *)connection willCacheResponse:(NSCachedURLResponse *)cachedResponse
+{
+  MLog(@"connection:willCacheResponse: %@, policy(%d)", [urlRequest description],[cachedResponse storagePolicy]);
+  [[NSURLCache sharedURLCache] storeCachedResponse:cachedResponse forRequest:urlRequest];
+  return cachedResponse;
+}
+
+
+- (void)setTimeout:(float)aTimeout
+{
+  timeout = aTimeout;
 }
 
 @end
