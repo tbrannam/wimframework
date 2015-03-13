@@ -16,3 +16,12 @@ This library is just beginning. We will be continuing to make available enhancem
 
 Take it for a spin - give us your feedback about what you'd like to see (or if you'd like to contribute).
 
+License:	[New BSD License](http://www.opensource.org/licenses/bsd-license.php)
+
+Resources
+------------------------
+* [Web Archive of WIM API documentation](https://web.archive.org/web/20090218224837/http://dev.aol.com/aim/web/serverapi_reference)
+* [WIM Framework overview slides](http://docs.google.com/present/view?id=d8nb5fm_44cz9f69g4)
+* [Open AIM developer program overview slides](http://x.aim.com/OpenAIMPresentation/)
+* [dev.aol.com](http://dev.aol.com/aim)
+* [Mac @ AOL Blog](http://macblog.aol.com/)
