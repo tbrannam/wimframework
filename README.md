@@ -1,6 +1,8 @@
 # wimframework
 Automatically exported from code.google.com/p/wimframework
 
+Original Objective-C protocol implemenation of the AIM for iPhone.   AIM for iPhone has since moved to a machine code generated implemenation.   Additionally AOL has closed the OpenAIM platform again - so this code largely is for historical reference.
+
 This Objective-C/Cocoa wrapper implements the logic for AOL's openAIM WIM protocol. Protocol documentation and AIM Network license requirements can be located at http://developer.aim.com
 
 Update New code drop includes numerous bug fixes, as well as moving to a delegate pattern for AIM host responses to commands (instead of using Notifications).
