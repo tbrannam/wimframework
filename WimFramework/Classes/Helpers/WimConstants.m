@@ -41,7 +41,7 @@ NSString* kUrlGetClientLogin = @"%@auth/clientLogin"; // requires kAuthBaseURL
 
 NSString* kUrlStartSession = @"%@aim/startSession?%@&sig_sha256=%@"; // requires kAPIBaseURL, queryString, digital signature
 NSString* kUrlEndSession = @"%@aim/endSession?f=json&aimsid=%@"; // requires kAPIBaseURL, aimsid
-NSString* kUrlFetchRequest = @"%@&f=json&r=%d&timeout=%d "; // requires: fetchBaseUrl, requestId, aimSid, timeout
+NSString* kUrlFetchRequest = @"%@&f=json&r=%d&timeout=%d"; // requires: fetchBaseUrl, requestId, aimSid, timeout
 //NSString* kUrlPresenceRequest = @"%@presence/get?f=json&k=%@&t=%@&awayMsg=1&profileMsg=1&emailLookup=1&location=1&memberSince=1"; // requires: kAPIBaseURL,  key, targetAimId
 NSString* kUrlPresenceRequest = @"%@presence/get?f=json&k=%@&t=%@&awayMsg=1&profileMsg=1&statusMsg=1&friendly=1"; // requires: kAPIBaseURL,  key, targetAimId
 NSString* kUrlSendIMRequest = @"%@im/sendIM?f=json&k=%@&a=%@&aimsid=%@&r=%d&message=%@&t=%@&autoResponse=%@&offlineIM=%@"; // requires: kAPIBaseURL, key, authtoken, aimSid,requestid,message, target, autoResponse, offlineIM
